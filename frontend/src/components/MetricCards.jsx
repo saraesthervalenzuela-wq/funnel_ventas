@@ -169,16 +169,16 @@ function MetricCards({ metrics }) {
   ]
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 sm:space-y-6">
       {/* Main metrics - Hero cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-5">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4 lg:gap-5">
         {mainCards.map((card, index) => (
           <MetricCard key={index} {...card} index={index} />
         ))}
       </div>
 
       {/* Secondary metrics */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">
         {secondaryCards.map((card, index) => (
           <MetricCard key={index} {...card} index={index + 4} />
         ))}

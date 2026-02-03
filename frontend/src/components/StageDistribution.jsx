@@ -119,16 +119,16 @@ function StageDistribution({ stages }) {
           <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" horizontal={false} />
           <XAxis
             type="number"
-            tick={{ fontSize: 11, fill: 'rgba(255,255,255,0.3)', fontWeight: 500, fontFamily: 'Red Hat Text' }}
+            tick={{ fontSize: 13, fill: 'rgba(255,255,255,0.4)', fontWeight: 500, fontFamily: 'Red Hat Text' }}
             stroke="rgba(255,255,255,0.06)"
             axisLine={false}
           />
           <YAxis
             type="category"
             dataKey="shortName"
-            tick={{ fontSize: 10, fill: 'rgba(255,255,255,0.5)', fontWeight: 600, fontFamily: 'Manrope' }}
+            tick={{ fontSize: 13, fill: 'rgba(255,255,255,0.6)', fontWeight: 600, fontFamily: 'Manrope' }}
             stroke="rgba(255,255,255,0.06)"
-            width={100}
+            width={120}
             axisLine={false}
             tickLine={false}
           />

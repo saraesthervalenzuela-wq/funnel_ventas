@@ -125,13 +125,13 @@ function TrendChart({ data }) {
           <CartesianGrid strokeDasharray="3 3" stroke="rgba(255, 255, 255, 0.04)" vertical={false} />
           <XAxis
             dataKey="dateFormatted"
-            tick={{ fontSize: 10, fill: 'rgba(255, 255, 255, 0.3)', fontWeight: 500, fontFamily: 'Red Hat Text' }}
+            tick={{ fontSize: 12, fill: 'rgba(255, 255, 255, 0.4)', fontWeight: 500, fontFamily: 'Red Hat Text' }}
             stroke="rgba(255, 255, 255, 0.06)"
             tickLine={false}
             axisLine={false}
           />
           <YAxis
-            tick={{ fontSize: 10, fill: 'rgba(255, 255, 255, 0.3)', fontWeight: 500, fontFamily: 'Red Hat Text' }}
+            tick={{ fontSize: 12, fill: 'rgba(255, 255, 255, 0.4)', fontWeight: 500, fontFamily: 'Red Hat Text' }}
             stroke="rgba(255, 255, 255, 0.06)"
             tickLine={false}
             axisLine={false}

@@ -1,6 +1,51 @@
 import React from 'react'
 import { motion } from 'framer-motion'
-import { TrendingUp, TrendingDown, Minus } from 'lucide-react'
+import {
+  TrendingUp,
+  TrendingDown,
+  Minus,
+  Facebook,
+  Instagram,
+  Globe,
+  Users,
+  Search,
+  Video,
+  Mail,
+  MessageCircle,
+  Megaphone,
+  Smartphone
+} from 'lucide-react'
+
+// Mapeo de iconos por fuente
+const SOURCE_ICONS = {
+  'facebook': Facebook,
+  'facebook ads': Facebook,
+  'google': Search,
+  'google ads': Search,
+  'instagram': Instagram,
+  'tiktok': Video,
+  'tiktok ads': Video,
+  'referidos': Users,
+  'referral': Users,
+  'orgánico': Globe,
+  'orgánico web': Globe,
+  'organic': Globe,
+  'email': Mail,
+  'whatsapp': MessageCircle,
+  'linkedin': Megaphone,
+  'sms': Smartphone,
+  'default': Globe
+}
+
+const getSourceIcon = (sourceName) => {
+  const normalizedName = sourceName.toLowerCase().trim()
+  for (const [key, icon] of Object.entries(SOURCE_ICONS)) {
+    if (normalizedName.includes(key)) {
+      return icon
+    }
+  }
+  return SOURCE_ICONS.default
+}
 
 function SourcesTable({ sources }) {
   if (!sources || sources.length === 0) {
@@ -80,22 +125,22 @@ function SourcesTable({ sources }) {
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.4 }}
           >
-            <th className="text-left py-4 px-4 text-[10px] font-bold text-white/30 uppercase tracking-[0.15em] font-display">
+            <th className="text-left py-5 px-5 text-xs font-bold text-white/40 uppercase tracking-[0.12em] font-display">
               Fuente
             </th>
-            <th className="text-center py-4 px-4 text-[10px] font-bold text-white/30 uppercase tracking-[0.15em] font-display">
+            <th className="text-center py-5 px-5 text-xs font-bold text-white/40 uppercase tracking-[0.12em] font-display">
               Leads
             </th>
-            <th className="text-center py-4 px-4 text-[10px] font-bold text-white/30 uppercase tracking-[0.15em] font-display">
+            <th className="text-center py-5 px-5 text-xs font-bold text-white/40 uppercase tracking-[0.12em] font-display">
               Calificados
             </th>
-            <th className="text-center py-4 px-4 text-[10px] font-bold text-white/30 uppercase tracking-[0.15em] font-display">
+            <th className="text-center py-5 px-5 text-xs font-bold text-white/40 uppercase tracking-[0.12em] font-display">
               Cierres
             </th>
-            <th className="text-right py-4 px-4 text-[10px] font-bold text-white/30 uppercase tracking-[0.15em] font-display">
+            <th className="text-right py-5 px-5 text-xs font-bold text-white/40 uppercase tracking-[0.12em] font-display">
               Valor
             </th>
-            <th className="text-center py-4 px-4 text-[10px] font-bold text-white/30 uppercase tracking-[0.15em] font-display">
+            <th className="text-center py-5 px-5 text-xs font-bold text-white/40 uppercase tracking-[0.12em] font-display">
               Conversión
             </th>
           </motion.tr>
@@ -118,42 +163,49 @@ function SourcesTable({ sources }) {
                   transition: { duration: 0.2 }
                 }}
               >
-                <td className="py-4 px-4">
-                  <div className="flex items-center gap-3">
-                    <motion.div
-                      className={`w-2.5 h-2.5 rounded-full bg-gradient-to-r ${GRADIENTS[index % GRADIENTS.length]}`}
-                      style={{ boxShadow: '0 0 10px rgba(20, 184, 166, 0.4)' }}
-                      whileHover={{ scale: 1.3 }}
-                      transition={{ duration: 0.2 }}
-                    />
-                    <span className="font-semibold text-white/80 text-sm group-hover:text-white transition-colors">
+                <td className="py-5 px-5">
+                  <div className="flex items-center gap-4">
+                    {(() => {
+                      const SourceIcon = getSourceIcon(source.source)
+                      return (
+                        <motion.div
+                          className={`w-10 h-10 rounded-xl bg-gradient-to-br ${GRADIENTS[index % GRADIENTS.length]} flex items-center justify-center`}
+                          style={{ boxShadow: '0 0 20px rgba(6, 182, 212, 0.3)' }}
+                          whileHover={{ scale: 1.1, rotate: 5 }}
+                          transition={{ duration: 0.2 }}
+                        >
+                          <SourceIcon className="w-5 h-5 text-white" strokeWidth={2} />
+                        </motion.div>
+                      )
+                    })()}
+                    <span className="font-semibold text-white/90 text-base group-hover:text-white transition-colors">
                       {source.source}
                     </span>
                   </div>
                 </td>
-                <td className="py-4 px-4 text-center">
-                  <span className="text-sm font-bold text-white">
+                <td className="py-5 px-5 text-center">
+                  <span className="text-base font-bold text-white">
                     {source.total}
                   </span>
                 </td>
-                <td className="py-4 px-4 text-center">
-                  <span className="text-sm font-medium text-white/50">
+                <td className="py-5 px-5 text-center">
+                  <span className="text-base font-medium text-white/50">
                     {source.calificados}
                   </span>
                 </td>
-                <td className="py-4 px-4 text-center">
-                  <span className="text-sm font-bold text-transparent bg-clip-text bg-gradient-to-r from-green-400 to-emerald-400">
+                <td className="py-5 px-5 text-center">
+                  <span className="text-base font-bold text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-blue-400">
                     {source.depositos}
                   </span>
                 </td>
-                <td className="py-4 px-4 text-right">
-                  <span className="text-sm font-bold text-white">
+                <td className="py-5 px-5 text-right">
+                  <span className="text-base font-bold text-white">
                     ${source.valorTotal.toLocaleString()}
                   </span>
                 </td>
-                <td className="py-4 px-4 text-center">
+                <td className="py-5 px-5 text-center">
                   <motion.span
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold"
+                    className="inline-flex items-center gap-2 px-4 py-2 rounded-full text-sm font-bold"
                     style={{
                       backgroundColor: badge.bg,
                       color: badge.color,
@@ -166,7 +218,7 @@ function SourcesTable({ sources }) {
                       transition: { duration: 0.2 }
                     }}
                   >
-                    <Icon className="h-3 w-3" strokeWidth={2.5} />
+                    <Icon className="h-4 w-4" strokeWidth={2.5} />
                     {source.tasaConversion}%
                   </motion.span>
                 </td>
@@ -178,39 +230,39 @@ function SourcesTable({ sources }) {
 
       {/* Summary totals */}
       <motion.div
-        className="mt-8 pt-6 flex flex-wrap gap-8 justify-end"
+        className="mt-10 pt-8 flex flex-wrap gap-12 justify-end"
         style={{ borderTop: '1px solid rgba(255, 255, 255, 0.06)' }}
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: sources.length * 0.08 + 0.3, duration: 0.5 }}
       >
         <motion.div
-          className="text-sm"
+          className="text-base"
           whileHover={{ scale: 1.05 }}
           transition={{ duration: 0.2 }}
         >
-          <span className="text-white/40 font-medium">Total Leads </span>
-          <span className="font-bold text-white text-lg ml-1 font-display">
+          <span className="text-white/50 font-medium">Total Leads </span>
+          <span className="font-bold text-white text-2xl ml-2 font-display">
             {sources.reduce((sum, s) => sum + s.total, 0)}
           </span>
         </motion.div>
         <motion.div
-          className="text-sm"
+          className="text-base"
           whileHover={{ scale: 1.05 }}
           transition={{ duration: 0.2 }}
         >
-          <span className="text-white/40 font-medium">Cierres </span>
-          <span className="font-bold text-transparent bg-clip-text bg-gradient-to-r from-green-400 to-emerald-400 text-lg ml-1 font-display">
+          <span className="text-white/50 font-medium">Cierres </span>
+          <span className="font-bold text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-blue-400 text-2xl ml-2 font-display">
             {sources.reduce((sum, s) => sum + s.depositos, 0)}
           </span>
         </motion.div>
         <motion.div
-          className="text-sm"
+          className="text-base"
           whileHover={{ scale: 1.05 }}
           transition={{ duration: 0.2 }}
         >
-          <span className="text-white/40 font-medium">Valor Total </span>
-          <span className="font-bold text-transparent bg-clip-text bg-gradient-to-r from-teal-400 to-cyan-400 text-lg ml-1 font-display">
+          <span className="text-white/50 font-medium">Valor Total </span>
+          <span className="font-bold text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-sky-400 text-2xl ml-2 font-display">
             ${sources.reduce((sum, s) => sum + s.valorTotal, 0).toLocaleString()}
           </span>
         </motion.div>

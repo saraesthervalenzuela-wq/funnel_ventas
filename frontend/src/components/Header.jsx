@@ -37,14 +37,14 @@ function Header({ dateRange, onDateChange, onRefresh, loading }) {
   }
 
   return (
-    <header className="sticky top-0 z-50 border-b border-white/[0.06]"
+    <header className="sticky top-0 z-50 border-b border-white/[0.06] rounded-t-xl sm:rounded-t-2xl lg:rounded-t-3xl"
             style={{
-              background: 'rgba(5, 5, 8, 0.8)',
+              background: 'rgba(5, 5, 8, 0.5)',
               backdropFilter: 'blur(20px) saturate(180%)',
               WebkitBackdropFilter: 'blur(20px) saturate(180%)'
             }}>
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex items-center justify-between h-18 py-4">
+      <div className="w-full px-4 sm:px-6 lg:px-10 xl:px-16">
+        <div className="flex items-center justify-between h-14 sm:h-16 lg:h-18 py-2 sm:py-3 lg:py-4">
           {/* Logo */}
           <div className="flex items-center gap-4">
             <div className="relative">
@@ -108,8 +108,8 @@ function Header({ dateRange, onDateChange, onRefresh, loading }) {
               ))}
             </div>
 
-            {/* Selector de fechas */}
-            <div className="flex items-center gap-2 px-3 py-2 rounded-xl"
+            {/* Selector de fechas - oculto en mobile */}
+            <div className="hidden sm:flex items-center gap-2 px-3 py-2 rounded-xl"
                  style={{
                    background: 'rgba(255, 255, 255, 0.03)',
                    border: '1px solid rgba(255, 255, 255, 0.06)'
