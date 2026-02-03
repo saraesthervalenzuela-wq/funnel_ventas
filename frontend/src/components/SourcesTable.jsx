@@ -98,13 +98,14 @@ function SourcesTable({ sources }) {
   ]
 
   const rowVariants = {
-    hidden: { opacity: 0, x: -20 },
+    hidden: { opacity: 0, x: -30, scale: 0.95 },
     visible: (i) => ({
       opacity: 1,
       x: 0,
+      scale: 1,
       transition: {
-        delay: i * 0.08,
-        duration: 0.5,
+        delay: i * 0.12,
+        duration: 0.6,
         ease: [0.22, 1, 0.36, 1]
       }
     })
@@ -122,8 +123,9 @@ function SourcesTable({ sources }) {
           <motion.tr
             style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.06)' }}
             initial={{ opacity: 0, y: -10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.4 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }}
+            transition={{ duration: 0.5 }}
           >
             <th className="text-left py-5 px-5 text-xs font-bold text-white/40 uppercase tracking-[0.12em] font-display">
               Fuente
@@ -157,7 +159,8 @@ function SourcesTable({ sources }) {
                 custom={index}
                 variants={rowVariants}
                 initial="hidden"
-                animate="visible"
+                whileInView="visible"
+                viewport={{ once: true, margin: "-20px" }}
                 whileHover={{
                   backgroundColor: 'rgba(255, 255, 255, 0.03)',
                   transition: { duration: 0.2 }
@@ -232,9 +235,10 @@ function SourcesTable({ sources }) {
       <motion.div
         className="mt-10 pt-8 flex flex-wrap gap-12 justify-end"
         style={{ borderTop: '1px solid rgba(255, 255, 255, 0.06)' }}
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: sources.length * 0.08 + 0.3, duration: 0.5 }}
+        initial={{ opacity: 0, y: 30 }}
+        whileInView={{ opacity: 1, y: 0 }}
+        viewport={{ once: true, margin: "-30px" }}
+        transition={{ duration: 0.7, ease: [0.22, 1, 0.36, 1] }}
       >
         <motion.div
           className="text-base"

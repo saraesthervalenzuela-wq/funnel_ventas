@@ -40,11 +40,12 @@ function MetricCard({ title, value, subtitle, color, isLarge = false, index = 0 
 
   return (
     <motion.div
-      initial={{ opacity: 0, y: 20, scale: 0.95 }}
-      animate={{ opacity: 1, y: 0, scale: 1 }}
+      initial={{ opacity: 0, y: 30, scale: 0.9 }}
+      whileInView={{ opacity: 1, y: 0, scale: 1 }}
+      viewport={{ once: true, margin: "-50px" }}
       transition={{
-        delay: index * 0.08,
-        duration: 0.5,
+        delay: index * 0.1,
+        duration: 0.6,
         ease: [0.22, 1, 0.36, 1]
       }}
       whileHover={{
@@ -91,8 +92,9 @@ function MetricCard({ title, value, subtitle, color, isLarge = false, index = 0 
           textShadow: `0 0 50px ${getGlowColor()}`
         }}
         initial={{ opacity: 0, x: -10 }}
-        animate={{ opacity: 1, x: 0 }}
-        transition={{ delay: index * 0.08 + 0.2, duration: 0.4 }}
+        whileInView={{ opacity: 1, x: 0 }}
+        viewport={{ once: true }}
+        transition={{ delay: index * 0.1 + 0.3, duration: 0.5 }}
       >
         {formatNumber(value)}
       </motion.p>

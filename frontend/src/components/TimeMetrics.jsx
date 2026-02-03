@@ -74,7 +74,8 @@ function TimeMetrics({ times }) {
       className="space-y-4"
       variants={containerVariants}
       initial="hidden"
-      animate="visible"
+      whileInView="visible"
+      viewport={{ once: true, margin: "-50px" }}
     >
       {metrics.map((metric, index) => {
         const Icon = metric.icon
