@@ -1,5 +1,5 @@
 import React from 'react'
-import { RefreshCw, Calendar, TrendingUp, Bell, Settings } from 'lucide-react'
+import { RefreshCw, Calendar, TrendingUp, Sparkles } from 'lucide-react'
 
 function Header({ dateRange, onDateChange, onRefresh, loading }) {
   const handleStartDateChange = (e) => {
@@ -37,29 +37,49 @@ function Header({ dateRange, onDateChange, onRefresh, loading }) {
   }
 
   return (
-    <header className="sticky top-0 z-50 border-b border-gray-800" style={{ backgroundColor: '#0a0a0a' }}>
+    <header className="sticky top-0 z-50 border-b border-white/[0.06]"
+            style={{
+              background: 'rgba(5, 5, 8, 0.8)',
+              backdropFilter: 'blur(20px) saturate(180%)',
+              WebkitBackdropFilter: 'blur(20px) saturate(180%)'
+            }}>
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex items-center justify-between h-16">
+        <div className="flex items-center justify-between h-18 py-4">
           {/* Logo */}
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-teal-400 to-teal-600 flex items-center justify-center">
-              <TrendingUp className="h-5 w-5 text-white" />
+          <div className="flex items-center gap-4">
+            <div className="relative">
+              <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-teal-400 via-teal-500 to-cyan-500 flex items-center justify-center shadow-lg"
+                   style={{ boxShadow: '0 0 30px rgba(20, 184, 166, 0.4)' }}>
+                <TrendingUp className="h-5 w-5 text-white" strokeWidth={2.5} />
+              </div>
+              <div className="absolute -top-1 -right-1 w-3 h-3 rounded-full bg-green-400 border-2 border-[#050508] animate-pulse" />
             </div>
             <div>
-              <span className="text-white font-bold text-lg">CIPLASTIC</span>
-              <span className="text-gray-500 text-xs block">Sales Funnel</span>
+              <span className="text-white font-bold text-xl tracking-tight">CIPLASTIC</span>
+              <div className="flex items-center gap-1.5">
+                <Sparkles className="w-3 h-3 text-teal-400" />
+                <span className="text-white/40 text-xs font-medium tracking-wide">Sales Funnel</span>
+              </div>
             </div>
           </div>
 
-          {/* Centro - Navegación */}
-          <nav className="hidden md:flex items-center gap-1 bg-gray-900/50 rounded-full p-1">
-            <button className="px-4 py-2 rounded-full bg-teal-500 text-white text-sm font-medium">
+          {/* Centro - Navegación Pill */}
+          <nav className="hidden md:flex items-center gap-1 p-1.5 rounded-2xl"
+               style={{
+                 background: 'rgba(255, 255, 255, 0.03)',
+                 border: '1px solid rgba(255, 255, 255, 0.06)'
+               }}>
+            <button className="px-5 py-2 rounded-xl text-sm font-semibold transition-all duration-300"
+                    style={{
+                      background: 'linear-gradient(135deg, #14b8a6 0%, #0ea5e9 100%)',
+                      boxShadow: '0 0 20px rgba(20, 184, 166, 0.3)'
+                    }}>
               Dashboard
             </button>
-            <button className="px-4 py-2 rounded-full text-gray-400 text-sm font-medium hover:text-white transition">
+            <button className="px-5 py-2 rounded-xl text-white/40 text-sm font-medium hover:text-white hover:bg-white/[0.04] transition-all duration-300">
               Reportes
             </button>
-            <button className="px-4 py-2 rounded-full text-gray-400 text-sm font-medium hover:text-white transition">
+            <button className="px-5 py-2 rounded-xl text-white/40 text-sm font-medium hover:text-white hover:bg-white/[0.04] transition-all duration-300">
               Análisis
             </button>
           </nav>
@@ -67,17 +87,21 @@ function Header({ dateRange, onDateChange, onRefresh, loading }) {
           {/* Derecha - Controles */}
           <div className="flex items-center gap-3">
             {/* Presets de fecha */}
-            <div className="hidden lg:flex gap-1 bg-gray-900/50 rounded-lg p-1">
+            <div className="hidden lg:flex gap-1 p-1 rounded-xl"
+                 style={{
+                   background: 'rgba(255, 255, 255, 0.03)',
+                   border: '1px solid rgba(255, 255, 255, 0.06)'
+                 }}>
               {[
-                { key: 'week', label: '7 días' },
-                { key: 'month', label: '30 días' },
-                { key: 'lastMonth', label: 'Mes Ant.' },
+                { key: 'week', label: '7D' },
+                { key: 'month', label: '30D' },
+                { key: 'lastMonth', label: 'Ant.' },
               ].map((preset) => (
                 <button
                   key={preset.key}
                   onClick={() => setPresetRange(preset.key)}
-                  className="px-3 py-1.5 text-xs font-medium text-gray-400 hover:text-white
-                           hover:bg-gray-800 rounded-md transition-all"
+                  className="px-3 py-1.5 text-xs font-semibold text-white/40 hover:text-white
+                           hover:bg-white/[0.06] rounded-lg transition-all duration-300"
                 >
                   {preset.label}
                 </button>
@@ -85,20 +109,24 @@ function Header({ dateRange, onDateChange, onRefresh, loading }) {
             </div>
 
             {/* Selector de fechas */}
-            <div className="flex items-center gap-2 bg-gray-900/50 rounded-lg px-3 py-1.5">
-              <Calendar className="h-4 w-4 text-gray-500" />
+            <div className="flex items-center gap-2 px-3 py-2 rounded-xl"
+                 style={{
+                   background: 'rgba(255, 255, 255, 0.03)',
+                   border: '1px solid rgba(255, 255, 255, 0.06)'
+                 }}>
+              <Calendar className="h-4 w-4 text-white/30" />
               <input
                 type="date"
                 value={dateRange.startDate}
                 onChange={handleStartDateChange}
-                className="bg-transparent text-sm text-gray-300 border-none focus:outline-none w-28"
+                className="bg-transparent text-sm text-white/70 border-none focus:outline-none w-28 font-medium"
               />
-              <span className="text-gray-600">-</span>
+              <span className="text-white/20 font-light">/</span>
               <input
                 type="date"
                 value={dateRange.endDate}
                 onChange={handleEndDateChange}
-                className="bg-transparent text-sm text-gray-300 border-none focus:outline-none w-28"
+                className="bg-transparent text-sm text-white/70 border-none focus:outline-none w-28 font-medium"
               />
             </div>
 
@@ -106,16 +134,20 @@ function Header({ dateRange, onDateChange, onRefresh, loading }) {
             <button
               onClick={onRefresh}
               disabled={loading}
-              className="flex items-center gap-2 px-4 py-2 bg-teal-500 text-white
-                       rounded-lg hover:bg-teal-600 transition-all disabled:opacity-50
-                       font-medium text-sm"
+              className="flex items-center gap-2 px-5 py-2.5 rounded-xl font-semibold text-sm
+                       transition-all duration-300 disabled:opacity-50 group"
+              style={{
+                background: 'linear-gradient(135deg, #14b8a6 0%, #0ea5e9 100%)',
+                boxShadow: loading ? 'none' : '0 0 25px rgba(20, 184, 166, 0.4)'
+              }}
             >
-              <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+              <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : 'group-hover:rotate-180 transition-transform duration-500'}`} />
               <span className="hidden sm:inline">Actualizar</span>
             </button>
 
             {/* Avatar */}
-            <div className="w-9 h-9 rounded-full bg-gradient-to-br from-teal-400 to-teal-600 flex items-center justify-center text-white font-semibold text-sm">
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-teal-400 to-cyan-500 flex items-center justify-center text-white font-bold text-sm shadow-lg"
+                 style={{ boxShadow: '0 0 20px rgba(20, 184, 166, 0.3)' }}>
               CP
             </div>
           </div>
