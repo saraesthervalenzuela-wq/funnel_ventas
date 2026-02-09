@@ -50,10 +50,12 @@ class MetricsService {
 
   // Filtrar oportunidades por rango de fechas
   filterByDateRange(opportunities, startDate, endDate) {
-    const start = new Date(startDate);
-    start.setHours(0, 0, 0, 0);
-    const end = new Date(endDate);
-    end.setHours(23, 59, 59, 999);
+    // Parsear componentes manualmente para evitar bugs de timezone
+    // new Date("YYYY-MM-DD") se parsea como UTC, pero setHours opera en hora local
+    const [sY, sM, sD] = startDate.split('-').map(Number);
+    const [eY, eM, eD] = endDate.split('-').map(Number);
+    const start = new Date(sY, sM - 1, sD, 0, 0, 0, 0);
+    const end = new Date(eY, eM - 1, eD, 23, 59, 59, 999);
 
     return opportunities.filter(opp => {
       const createdAt = new Date(opp.createdAt || opp.dateAdded);
@@ -61,142 +63,151 @@ class MetricsService {
     });
   }
 
+  // Calcular todas las métricas con una sola consulta a GHL
+  async calculateAllMetrics(startDate, endDate) {
+    const allOpportunities = await ghlService.getOpportunities();
+    const opportunities = this.filterByDateRange(allOpportunities, startDate, endDate);
+
+    console.log(`📊 Filtrado: ${opportunities.length} de ${allOpportunities.length} oportunidades para ${startDate} - ${endDate}`);
+
+    return {
+      funnel: this._buildFunnelMetrics(opportunities),
+      stages: this._buildStageDistribution(opportunities),
+      times: this._buildAverageTimes(opportunities),
+      sources: this._buildSourceMetrics(opportunities),
+      trend: this._buildDailyTrend(opportunities)
+    };
+  }
+
   // Calcular métricas principales del funnel
   async calculateFunnelMetrics(startDate, endDate) {
     try {
       const allOpportunities = await ghlService.getOpportunities();
       const opportunities = this.filterByDateRange(allOpportunities, startDate, endDate);
-
-      // Contar por etapa usando pipelineStageId
-      const countByStage = {};
-      this.stageOrder.forEach(id => countByStage[id] = 0);
-
-      opportunities.forEach(opp => {
-        const stageId = opp.pipelineStageId;
-        if (countByStage[stageId] !== undefined) {
-          countByStage[stageId]++;
-        }
-      });
-
-      // 1. Total Leads
-      const totalLeads = opportunities.length;
-
-      // 2. Leads Calificados = todos excepto E1
-      const leadsCalificados = opportunities.filter(opp =>
-        opp.pipelineStageId !== this.stageIds.nuevoLead
-      ).length;
-
-      // 3. Agendadas a Valoración = E5 + VV RE + E6 + E7 + E8 + E9 + E10
-      const stagesAgendadas = [
-        this.stageIds.valoracionVirtual,
-        this.stageIds.vvReagendada,
-        this.stageIds.vvNoContesto,
-        this.stageIds.valoracionRealizada,
-        this.stageIds.seguimientoCierre,
-        this.stageIds.depositoRealizado,
-        this.stageIds.fechaCirugia
-      ];
-      const agendadasValoracion = opportunities.filter(opp =>
-        stagesAgendadas.includes(opp.pipelineStageId)
-      ).length;
-
-      // 4. Valoradas con Cotización = E7 + E8 + E9 + E10
-      const stagesValoradas = [
-        this.stageIds.valoracionRealizada,
-        this.stageIds.seguimientoCierre,
-        this.stageIds.depositoRealizado,
-        this.stageIds.fechaCirugia
-      ];
-      const valoradasCotizacion = opportunities.filter(opp =>
-        stagesValoradas.includes(opp.pipelineStageId)
-      ).length;
-
-      // 5. No se contactó = E6
-      const noContactoValoracion = countByStage[this.stageIds.vvNoContesto] || 0;
-
-      // 6. Oportunidades de cierre = E8 + E9 + E10
-      const stagesCierre = [
-        this.stageIds.seguimientoCierre,
-        this.stageIds.depositoRealizado,
-        this.stageIds.fechaCirugia
-      ];
-      const oportunidadesCierre = opportunities.filter(opp =>
-        stagesCierre.includes(opp.pipelineStageId)
-      );
-
-      const cierreAlta = oportunidadesCierre.filter(opp =>
-        (parseFloat(opp.monetaryValue) || 0) > 50000
-      ).length;
-
-      const cierreMedia = oportunidadesCierre.filter(opp => {
-        const value = parseFloat(opp.monetaryValue) || 0;
-        return value > 0 && value <= 50000;
-      }).length;
-
-      // 7. Depósitos = E9 + E10
-      const stagesDeposito = [
-        this.stageIds.depositoRealizado,
-        this.stageIds.fechaCirugia
-      ];
-      const depositosRealizados = opportunities.filter(opp =>
-        stagesDeposito.includes(opp.pipelineStageId)
-      );
-
-      const totalDepositos = depositosRealizados.reduce((sum, opp) =>
-        sum + (parseFloat(opp.monetaryValue) || 0), 0
-      );
-
-      // 8. Depósitos de campañas
-      const depositosCampanas = depositosRealizados.filter(opp => {
-        const source = (opp.source || '').toLowerCase();
-        const tags = (opp.contact?.tags || []).join(' ').toLowerCase();
-        return source.includes('facebook') || source.includes('instagram') ||
-               source.includes('form') || source.includes('landing') ||
-               tags.includes('fb-ad') || tags.includes('instagram-ad');
-      });
-
-      const totalDepositosCampanas = depositosCampanas.reduce((sum, opp) =>
-        sum + (parseFloat(opp.monetaryValue) || 0), 0
-      );
-
-      return {
-        totalLeads,
-        leadsCalificados,
-        agendadasValoracion,
-        valoradasCotizacion,
-        noContactoValoracion,
-        oportunidadesCierreAlta: cierreAlta,
-        oportunidadesCierreMedia: cierreMedia,
-        oportunidadesCierreTotal: oportunidadesCierre.length,
-        depositosRealizados: depositosRealizados.length,
-        totalDepositos,
-        depositosCampanas: depositosCampanas.length,
-        totalDepositosCampanas,
-        tasaConversion: totalLeads > 0
-          ? ((depositosRealizados.length / totalLeads) * 100).toFixed(2)
-          : 0,
-        tasaContacto: totalLeads > 0
-          ? ((leadsCalificados / totalLeads) * 100).toFixed(2)
-          : 0,
-        // Desglose detallado por etapa
-        porEtapa: {
-          e1_nuevoLead: countByStage[this.stageIds.nuevoLead] || 0,
-          e2_interes: countByStage[this.stageIds.interesPendiente] || 0,
-          e3_seguimiento: countByStage[this.stageIds.seguimientoFotos] || 0,
-          e4_fotosRecibidas: countByStage[this.stageIds.fotosRecibidas] || 0,
-          e5_valoracionVirtual: countByStage[this.stageIds.valoracionVirtual] || 0,
-          vvReagendada: countByStage[this.stageIds.vvReagendada] || 0,
-          e6_noContesto: countByStage[this.stageIds.vvNoContesto] || 0,
-          e7_valoracionRealizada: countByStage[this.stageIds.valoracionRealizada] || 0,
-          e8_seguimientoCierre: countByStage[this.stageIds.seguimientoCierre] || 0,
-          e9_deposito: countByStage[this.stageIds.depositoRealizado] || 0,
-          e10_fechaCirugia: countByStage[this.stageIds.fechaCirugia] || 0
-        }
-      };
+      return this._buildFunnelMetrics(opportunities);
     } catch (error) {
       console.error('Error calculando métricas:', error);
       throw error;
     }
+  }
+
+  _buildFunnelMetrics(opportunities) {
+    const countByStage = {};
+    this.stageOrder.forEach(id => countByStage[id] = 0);
+
+    opportunities.forEach(opp => {
+      const stageId = opp.pipelineStageId;
+      if (countByStage[stageId] !== undefined) {
+        countByStage[stageId]++;
+      }
+    });
+
+    const totalLeads = opportunities.length;
+
+    const leadsCalificados = opportunities.filter(opp =>
+      opp.pipelineStageId !== this.stageIds.nuevoLead
+    ).length;
+
+    const stagesAgendadas = [
+      this.stageIds.valoracionVirtual,
+      this.stageIds.vvReagendada,
+      this.stageIds.vvNoContesto,
+      this.stageIds.valoracionRealizada,
+      this.stageIds.seguimientoCierre,
+      this.stageIds.depositoRealizado,
+      this.stageIds.fechaCirugia
+    ];
+    const agendadasValoracion = opportunities.filter(opp =>
+      stagesAgendadas.includes(opp.pipelineStageId)
+    ).length;
+
+    const stagesValoradas = [
+      this.stageIds.valoracionRealizada,
+      this.stageIds.seguimientoCierre,
+      this.stageIds.depositoRealizado,
+      this.stageIds.fechaCirugia
+    ];
+    const valoradasCotizacion = opportunities.filter(opp =>
+      stagesValoradas.includes(opp.pipelineStageId)
+    ).length;
+
+    const noContactoValoracion = countByStage[this.stageIds.vvNoContesto] || 0;
+
+    const stagesCierre = [
+      this.stageIds.seguimientoCierre,
+      this.stageIds.depositoRealizado,
+      this.stageIds.fechaCirugia
+    ];
+    const oportunidadesCierre = opportunities.filter(opp =>
+      stagesCierre.includes(opp.pipelineStageId)
+    );
+
+    const cierreAlta = oportunidadesCierre.filter(opp =>
+      (parseFloat(opp.monetaryValue) || 0) > 50000
+    ).length;
+
+    const cierreMedia = oportunidadesCierre.filter(opp => {
+      const value = parseFloat(opp.monetaryValue) || 0;
+      return value > 0 && value <= 50000;
+    }).length;
+
+    const stagesDeposito = [
+      this.stageIds.depositoRealizado,
+      this.stageIds.fechaCirugia
+    ];
+    const depositosRealizados = opportunities.filter(opp =>
+      stagesDeposito.includes(opp.pipelineStageId)
+    );
+
+    const totalDepositos = depositosRealizados.reduce((sum, opp) =>
+      sum + (parseFloat(opp.monetaryValue) || 0), 0
+    );
+
+    const depositosCampanas = depositosRealizados.filter(opp => {
+      const source = (opp.source || '').toLowerCase();
+      const tags = (opp.contact?.tags || []).join(' ').toLowerCase();
+      return source.includes('facebook') || source.includes('instagram') ||
+             source.includes('form') || source.includes('landing') ||
+             tags.includes('fb-ad') || tags.includes('instagram-ad');
+    });
+
+    const totalDepositosCampanas = depositosCampanas.reduce((sum, opp) =>
+      sum + (parseFloat(opp.monetaryValue) || 0), 0
+    );
+
+    return {
+      totalLeads,
+      leadsCalificados,
+      agendadasValoracion,
+      valoradasCotizacion,
+      noContactoValoracion,
+      oportunidadesCierreAlta: cierreAlta,
+      oportunidadesCierreMedia: cierreMedia,
+      oportunidadesCierreTotal: oportunidadesCierre.length,
+      depositosRealizados: depositosRealizados.length,
+      totalDepositos,
+      depositosCampanas: depositosCampanas.length,
+      totalDepositosCampanas,
+      tasaConversion: totalLeads > 0
+        ? ((depositosRealizados.length / totalLeads) * 100).toFixed(2)
+        : 0,
+      tasaContacto: totalLeads > 0
+        ? ((leadsCalificados / totalLeads) * 100).toFixed(2)
+        : 0,
+      porEtapa: {
+        e1_nuevoLead: countByStage[this.stageIds.nuevoLead] || 0,
+        e2_interes: countByStage[this.stageIds.interesPendiente] || 0,
+        e3_seguimiento: countByStage[this.stageIds.seguimientoFotos] || 0,
+        e4_fotosRecibidas: countByStage[this.stageIds.fotosRecibidas] || 0,
+        e5_valoracionVirtual: countByStage[this.stageIds.valoracionVirtual] || 0,
+        vvReagendada: countByStage[this.stageIds.vvReagendada] || 0,
+        e6_noContesto: countByStage[this.stageIds.vvNoContesto] || 0,
+        e7_valoracionRealizada: countByStage[this.stageIds.valoracionRealizada] || 0,
+        e8_seguimientoCierre: countByStage[this.stageIds.seguimientoCierre] || 0,
+        e9_deposito: countByStage[this.stageIds.depositoRealizado] || 0,
+        e10_fechaCirugia: countByStage[this.stageIds.fechaCirugia] || 0
+      }
+    };
   }
 
   // Calcular distribución por etapas
@@ -204,30 +215,33 @@ class MetricsService {
     try {
       const allOpportunities = await ghlService.getOpportunities();
       const opportunities = this.filterByDateRange(allOpportunities, startDate, endDate);
-
-      const distribution = {};
-      this.stageOrder.forEach(id => {
-        distribution[id] = { count: 0, value: 0 };
-      });
-
-      opportunities.forEach(opp => {
-        const stageId = opp.pipelineStageId;
-        if (distribution[stageId]) {
-          distribution[stageId].count++;
-          distribution[stageId].value += parseFloat(opp.monetaryValue) || 0;
-        }
-      });
-
-      return this.stageOrder.map(stageId => ({
-        stageId,
-        stage: this.stageNames[stageId] || stageId,
-        count: distribution[stageId].count,
-        value: distribution[stageId].value
-      }));
+      return this._buildStageDistribution(opportunities);
     } catch (error) {
       console.error('Error calculando distribución:', error);
       throw error;
     }
+  }
+
+  _buildStageDistribution(opportunities) {
+    const distribution = {};
+    this.stageOrder.forEach(id => {
+      distribution[id] = { count: 0, value: 0 };
+    });
+
+    opportunities.forEach(opp => {
+      const stageId = opp.pipelineStageId;
+      if (distribution[stageId]) {
+        distribution[stageId].count++;
+        distribution[stageId].value += parseFloat(opp.monetaryValue) || 0;
+      }
+    });
+
+    return this.stageOrder.map(stageId => ({
+      stageId,
+      stage: this.stageNames[stageId] || stageId,
+      count: distribution[stageId].count,
+      value: distribution[stageId].value
+    }));
   }
 
   // Calcular tiempos promedio
@@ -235,42 +249,45 @@ class MetricsService {
     try {
       const allOpportunities = await ghlService.getOpportunities();
       const opportunities = this.filterByDateRange(allOpportunities, startDate, endDate);
-
-      const stagesDeposito = [
-        this.stageIds.depositoRealizado,
-        this.stageIds.fechaCirugia
-      ];
-
-      const closedOpportunities = opportunities.filter(opp =>
-        stagesDeposito.includes(opp.pipelineStageId)
-      );
-
-      const tiempos = [];
-      closedOpportunities.forEach(opp => {
-        const createdAt = new Date(opp.createdAt);
-        const updatedAt = new Date(opp.updatedAt || opp.lastStatusChangeAt);
-        const daysDiff = Math.ceil((updatedAt - createdAt) / (1000 * 60 * 60 * 24));
-
-        if (daysDiff > 0 && daysDiff < 365) {
-          tiempos.push(daysDiff);
-        }
-      });
-
-      const calcAverage = (arr) => {
-        if (arr.length === 0) return 0;
-        return Math.round(arr.reduce((a, b) => a + b, 0) / arr.length);
-      };
-
-      return {
-        promedioTiempoCierre: calcAverage(tiempos),
-        oportunidadesAnalizadas: closedOpportunities.length,
-        tiempoMinimoCierre: tiempos.length > 0 ? Math.min(...tiempos) : 0,
-        tiempoMaximoCierre: tiempos.length > 0 ? Math.max(...tiempos) : 0
-      };
+      return this._buildAverageTimes(opportunities);
     } catch (error) {
       console.error('Error calculando tiempos:', error);
       throw error;
     }
+  }
+
+  _buildAverageTimes(opportunities) {
+    const stagesDeposito = [
+      this.stageIds.depositoRealizado,
+      this.stageIds.fechaCirugia
+    ];
+
+    const closedOpportunities = opportunities.filter(opp =>
+      stagesDeposito.includes(opp.pipelineStageId)
+    );
+
+    const tiempos = [];
+    closedOpportunities.forEach(opp => {
+      const createdAt = new Date(opp.createdAt);
+      const updatedAt = new Date(opp.updatedAt || opp.lastStatusChangeAt);
+      const daysDiff = Math.ceil((updatedAt - createdAt) / (1000 * 60 * 60 * 24));
+
+      if (daysDiff > 0 && daysDiff < 365) {
+        tiempos.push(daysDiff);
+      }
+    });
+
+    const calcAverage = (arr) => {
+      if (arr.length === 0) return 0;
+      return Math.round(arr.reduce((a, b) => a + b, 0) / arr.length);
+    };
+
+    return {
+      promedioTiempoCierre: calcAverage(tiempos),
+      oportunidadesAnalizadas: closedOpportunities.length,
+      tiempoMinimoCierre: tiempos.length > 0 ? Math.min(...tiempos) : 0,
+      tiempoMaximoCierre: tiempos.length > 0 ? Math.max(...tiempos) : 0
+    };
   }
 
   // Métricas por fuente/campaña
@@ -278,78 +295,44 @@ class MetricsService {
     try {
       const allOpportunities = await ghlService.getOpportunities();
       const opportunities = this.filterByDateRange(allOpportunities, startDate, endDate);
-
-      const sourceMetrics = {};
-
-      opportunities.forEach(opp => {
-        let source = opp.source || null;
-
-        // Detectar fuente por tags si no hay source
-        const tags = (opp.contact?.tags || []).join(' ').toLowerCase();
-        if (!source) {
-          if (tags.includes('fb-ad') || tags.includes('facebook')) {
-            source = 'Facebook Ads';
-          } else if (tags.includes('instagram-ad')) {
-            source = 'Instagram Ads';
-          } else if (tags.includes('inbound whatsapp')) {
-            source = 'WhatsApp Inbound';
-          } else {
-            source = 'Sin fuente';
-          }
-        }
-
-        if (!sourceMetrics[source]) {
-          sourceMetrics[source] = {
-            total: 0, calificados: 0, valoraciones: 0, depositos: 0, valorTotal: 0
-          };
-        }
-
-        sourceMetrics[source].total++;
-        const stageId = opp.pipelineStageId;
-
-        if (stageId !== this.stageIds.nuevoLead) {
-          sourceMetrics[source].calificados++;
-        }
-
-        const stagesValoradas = [
-          this.stageIds.valoracionRealizada,
-          this.stageIds.seguimientoCierre,
-          this.stageIds.depositoRealizado,
-          this.stageIds.fechaCirugia
-        ];
-        if (stagesValoradas.includes(stageId)) {
-          sourceMetrics[source].valoraciones++;
-        }
-
-        const stagesDeposito = [this.stageIds.depositoRealizado, this.stageIds.fechaCirugia];
-        if (stagesDeposito.includes(stageId)) {
-          sourceMetrics[source].depositos++;
-          sourceMetrics[source].valorTotal += parseFloat(opp.monetaryValue) || 0;
-        }
-      });
-
-      return Object.entries(sourceMetrics)
-        .map(([source, metrics]) => ({
-          source,
-          ...metrics,
-          tasaConversion: metrics.total > 0
-            ? ((metrics.depositos / metrics.total) * 100).toFixed(2)
-            : 0
-        }))
-        .sort((a, b) => b.total - a.total);
+      return this._buildSourceMetrics(opportunities);
     } catch (error) {
       console.error('Error calculando métricas por fuente:', error);
       throw error;
     }
   }
 
-  // Tendencia diaria
-  async getDailyTrend(startDate, endDate) {
-    try {
-      const allOpportunities = await ghlService.getOpportunities();
-      const opportunities = this.filterByDateRange(allOpportunities, startDate, endDate);
+  _buildSourceMetrics(opportunities) {
+    const sourceMetrics = {};
 
-      const dailyData = {};
+    opportunities.forEach(opp => {
+      let source = opp.source || null;
+
+      const tags = (opp.contact?.tags || []).join(' ').toLowerCase();
+      if (!source) {
+        if (tags.includes('fb-ad') || tags.includes('facebook')) {
+          source = 'Facebook Ads';
+        } else if (tags.includes('instagram-ad')) {
+          source = 'Instagram Ads';
+        } else if (tags.includes('inbound whatsapp')) {
+          source = 'WhatsApp Inbound';
+        } else {
+          source = 'Sin fuente';
+        }
+      }
+
+      if (!sourceMetrics[source]) {
+        sourceMetrics[source] = {
+          total: 0, calificados: 0, valoraciones: 0, depositos: 0, valorTotal: 0
+        };
+      }
+
+      sourceMetrics[source].total++;
+      const stageId = opp.pipelineStageId;
+
+      if (stageId !== this.stageIds.nuevoLead) {
+        sourceMetrics[source].calificados++;
+      }
 
       const stagesValoradas = [
         this.stageIds.valoracionRealizada,
@@ -357,33 +340,73 @@ class MetricsService {
         this.stageIds.depositoRealizado,
         this.stageIds.fechaCirugia
       ];
+      if (stagesValoradas.includes(stageId)) {
+        sourceMetrics[source].valoraciones++;
+      }
+
       const stagesDeposito = [this.stageIds.depositoRealizado, this.stageIds.fechaCirugia];
+      if (stagesDeposito.includes(stageId)) {
+        sourceMetrics[source].depositos++;
+        sourceMetrics[source].valorTotal += parseFloat(opp.monetaryValue) || 0;
+      }
+    });
 
-      opportunities.forEach(opp => {
-        const date = new Date(opp.createdAt);
-        const dateKey = date.toISOString().split('T')[0];
+    return Object.entries(sourceMetrics)
+      .map(([source, metrics]) => ({
+        source,
+        ...metrics,
+        tasaConversion: metrics.total > 0
+          ? ((metrics.depositos / metrics.total) * 100).toFixed(2)
+          : 0
+      }))
+      .sort((a, b) => b.total - a.total);
+  }
 
-        if (!dailyData[dateKey]) {
-          dailyData[dateKey] = { leads: 0, valoraciones: 0, depositos: 0 };
-        }
-
-        dailyData[dateKey].leads++;
-
-        if (stagesValoradas.includes(opp.pipelineStageId)) {
-          dailyData[dateKey].valoraciones++;
-        }
-        if (stagesDeposito.includes(opp.pipelineStageId)) {
-          dailyData[dateKey].depositos++;
-        }
-      });
-
-      return Object.entries(dailyData)
-        .map(([date, data]) => ({ date, ...data }))
-        .sort((a, b) => new Date(a.date) - new Date(b.date));
+  // Tendencia diaria
+  async getDailyTrend(startDate, endDate) {
+    try {
+      const allOpportunities = await ghlService.getOpportunities();
+      const opportunities = this.filterByDateRange(allOpportunities, startDate, endDate);
+      return this._buildDailyTrend(opportunities);
     } catch (error) {
       console.error('Error obteniendo tendencia:', error);
       throw error;
     }
+  }
+
+  _buildDailyTrend(opportunities) {
+    const dailyData = {};
+
+    const stagesValoradas = [
+      this.stageIds.valoracionRealizada,
+      this.stageIds.seguimientoCierre,
+      this.stageIds.depositoRealizado,
+      this.stageIds.fechaCirugia
+    ];
+    const stagesDeposito = [this.stageIds.depositoRealizado, this.stageIds.fechaCirugia];
+
+    opportunities.forEach(opp => {
+      const date = new Date(opp.createdAt);
+      // Usar fecha local en vez de UTC para la agrupación diaria
+      const dateKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+
+      if (!dailyData[dateKey]) {
+        dailyData[dateKey] = { leads: 0, valoraciones: 0, depositos: 0 };
+      }
+
+      dailyData[dateKey].leads++;
+
+      if (stagesValoradas.includes(opp.pipelineStageId)) {
+        dailyData[dateKey].valoraciones++;
+      }
+      if (stagesDeposito.includes(opp.pipelineStageId)) {
+        dailyData[dateKey].depositos++;
+      }
+    });
+
+    return Object.entries(dailyData)
+      .map(([date, data]) => ({ date, ...data }))
+      .sort((a, b) => new Date(a.date) - new Date(b.date));
   }
 }
 

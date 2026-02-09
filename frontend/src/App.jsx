@@ -13,7 +13,7 @@ import DarkVeil from './components/DarkVeil'
 import mockData from './mockData'
 
 // Cambiar a false para usar el API real de GHL
-const USE_MOCK_DATA = true
+const USE_MOCK_DATA = false
 
 function App() {
   const [loading, setLoading] = useState(true)
@@ -35,14 +35,12 @@ function App() {
 
     // Usar datos mock para visualizar el diseño
     if (USE_MOCK_DATA) {
-      // Simular delay de carga para ver el spinner
       await new Promise(resolve => setTimeout(resolve, 800))
       setData(mockData)
       setLoading(false)
       return
     }
 
-    // Código original para API real (comentado temporalmente)
     try {
       const axios = (await import('axios')).default
       const response = await axios.get('/api/metrics/summary', {
@@ -51,6 +49,7 @@ function App() {
 
       if (response.data.success) {
         setData(response.data.data)
+        setError(null)
       } else {
         setError('Error al obtener los datos')
       }
@@ -67,6 +66,14 @@ function App() {
 
   useEffect(() => {
     fetchData()
+  }, [dateRange])
+
+  // Auto-refresh cada 5 minutos
+  useEffect(() => {
+    const interval = setInterval(() => {
+      fetchData()
+    }, 5 * 60 * 1000)
+    return () => clearInterval(interval)
   }, [dateRange])
 
   const handleDateChange = (newRange) => {
@@ -173,7 +180,7 @@ function App() {
         )}
 
         {data && (
-          <div className="space-y-6 sm:space-y-8 lg:space-y-10">
+          <div className={`space-y-6 sm:space-y-8 lg:space-y-10 transition-opacity duration-300 ${loading ? 'opacity-50 pointer-events-none' : 'opacity-100'}`}>
             {/* Métricas principales */}
             <MetricCards metrics={data.funnel} />
 

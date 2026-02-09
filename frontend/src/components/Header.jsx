@@ -1,7 +1,10 @@
-import React from 'react'
+import React, { useState } from 'react'
 import { RefreshCw, Calendar, TrendingUp, Sparkles } from 'lucide-react'
 
 function Header({ dateRange, onDateChange, onRefresh, loading }) {
+  const [activePreset, setActivePreset] = useState(null)
+  const [showRangePicker, setShowRangePicker] = useState(false)
+
   const handleStartDateChange = (e) => {
     onDateChange({ ...dateRange, startDate: e.target.value })
   }
@@ -10,24 +13,46 @@ function Header({ dateRange, onDateChange, onRefresh, loading }) {
     onDateChange({ ...dateRange, endDate: e.target.value })
   }
 
+  // Formatear fecha local sin problemas de timezone (toISOString usa UTC)
+  const formatDate = (date) => {
+    const y = date.getFullYear()
+    const m = String(date.getMonth() + 1).padStart(2, '0')
+    const d = String(date.getDate()).padStart(2, '0')
+    return `${y}-${m}-${d}`
+  }
+
   const setPresetRange = (preset) => {
+    if (preset === 'range') {
+      setActivePreset('range')
+      setShowRangePicker(true)
+      return
+    }
+
+    setShowRangePicker(false)
+    setActivePreset(preset)
+
     const now = new Date()
     let startDate, endDate
 
     switch (preset) {
+      case 'yesterday':
+        const yesterday = new Date(now)
+        yesterday.setDate(now.getDate() - 1)
+        startDate = formatDate(yesterday)
+        endDate = formatDate(yesterday)
+        break
       case 'week':
         const weekStart = new Date(now)
         weekStart.setDate(now.getDate() - 7)
-        startDate = weekStart.toISOString().split('T')[0]
-        endDate = now.toISOString().split('T')[0]
+        startDate = formatDate(weekStart)
+        endDate = formatDate(now)
         break
       case 'month':
-        startDate = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0]
-        endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().split('T')[0]
-        break
-      case 'lastMonth':
-        startDate = new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString().split('T')[0]
-        endDate = new Date(now.getFullYear(), now.getMonth(), 0).toISOString().split('T')[0]
+        // Mes calendario actual (del 1ro al último día del mes)
+        const firstDay = new Date(now.getFullYear(), now.getMonth(), 1)
+        const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0)
+        startDate = formatDate(firstDay)
+        endDate = formatDate(lastDay)
         break
       default:
         return
@@ -87,48 +112,58 @@ function Header({ dateRange, onDateChange, onRefresh, loading }) {
           {/* Derecha - Controles */}
           <div className="flex items-center gap-3">
             {/* Presets de fecha */}
-            <div className="hidden lg:flex gap-1 p-1 rounded-xl"
+            <div className="hidden sm:flex gap-1 p-1 rounded-xl"
                  style={{
                    background: 'rgba(255, 255, 255, 0.03)',
                    border: '1px solid rgba(255, 255, 255, 0.06)'
                  }}>
               {[
-                { key: 'week', label: '7D' },
-                { key: 'month', label: '30D' },
-                { key: 'lastMonth', label: 'Ant.' },
+                { key: 'yesterday', label: 'Ayer' },
+                { key: 'week', label: 'Semana' },
+                { key: 'month', label: 'Mes' },
+                { key: 'range', label: 'Rango' },
               ].map((preset) => (
                 <button
                   key={preset.key}
                   onClick={() => setPresetRange(preset.key)}
-                  className="px-3 py-1.5 text-xs font-semibold text-white/40 hover:text-white
-                           hover:bg-white/[0.06] rounded-lg transition-all duration-300"
+                  className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all duration-300 ${
+                    activePreset === preset.key
+                      ? 'text-white'
+                      : 'text-white/40 hover:text-white hover:bg-white/[0.06]'
+                  }`}
+                  style={activePreset === preset.key ? {
+                    background: 'linear-gradient(135deg, #14b8a6 0%, #0ea5e9 100%)',
+                    boxShadow: '0 0 15px rgba(20, 184, 166, 0.3)'
+                  } : {}}
                 >
                   {preset.label}
                 </button>
               ))}
             </div>
 
-            {/* Selector de fechas - oculto en mobile */}
-            <div className="hidden sm:flex items-center gap-2 px-3 py-2 rounded-xl"
-                 style={{
-                   background: 'rgba(255, 255, 255, 0.03)',
-                   border: '1px solid rgba(255, 255, 255, 0.06)'
-                 }}>
-              <Calendar className="h-4 w-4 text-white/30" />
-              <input
-                type="date"
-                value={dateRange.startDate}
-                onChange={handleStartDateChange}
-                className="bg-transparent text-sm text-white/70 border-none focus:outline-none w-28 font-medium"
-              />
-              <span className="text-white/20 font-light">/</span>
-              <input
-                type="date"
-                value={dateRange.endDate}
-                onChange={handleEndDateChange}
-                className="bg-transparent text-sm text-white/70 border-none focus:outline-none w-28 font-medium"
-              />
-            </div>
+            {/* Selector de rango de fechas */}
+            {showRangePicker && (
+              <div className="flex items-center gap-2 px-3 py-2 rounded-xl"
+                   style={{
+                     background: 'rgba(255, 255, 255, 0.03)',
+                     border: '1px solid rgba(255, 255, 255, 0.06)'
+                   }}>
+                <Calendar className="h-4 w-4 text-white/30" />
+                <input
+                  type="date"
+                  value={dateRange.startDate}
+                  onChange={handleStartDateChange}
+                  className="bg-transparent text-sm text-white/70 border-none focus:outline-none w-28 font-medium"
+                />
+                <span className="text-white/20 font-light">/</span>
+                <input
+                  type="date"
+                  value={dateRange.endDate}
+                  onChange={handleEndDateChange}
+                  className="bg-transparent text-sm text-white/70 border-none focus:outline-none w-28 font-medium"
+                />
+              </div>
+            )}
 
             {/* Botón de refresh */}
             <button

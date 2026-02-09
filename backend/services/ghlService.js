@@ -20,6 +20,12 @@ class GHLService {
     this.requestDelay = 500; // 500ms entre peticiones
     this.maxRetries = 3;
     this.retryDelay = 2000; // 2 segundos inicial para retry
+
+    // Caché en memoria para evitar re-descargar en cada filtro
+    this._cachedOpportunities = null;
+    this._cacheTimestamp = null;
+    this._cacheTTL = 5 * 60 * 1000; // 5 minutos
+    this._fetchInProgress = null; // Evitar llamadas duplicadas simultáneas
   }
 
   // Función de delay
@@ -47,8 +53,37 @@ class GHLService {
     }
   }
 
-  // Obtener todas las oportunidades del pipeline
+  // Obtener todas las oportunidades del pipeline (con caché en memoria)
   async getOpportunities(startDate = null, endDate = null) {
+    // Si el caché es fresco, devolver inmediatamente
+    if (this._cachedOpportunities && this._cacheTimestamp) {
+      const age = Date.now() - this._cacheTimestamp;
+      if (age < this._cacheTTL) {
+        const ageSec = Math.round(age / 1000);
+        console.log(`⚡ Cache memoria: ${this._cachedOpportunities.length} oportunidades (edad: ${ageSec}s)`);
+        return this._cachedOpportunities;
+      }
+    }
+
+    // Si ya hay una descarga en curso, esperar a que termine (evita duplicados)
+    if (this._fetchInProgress) {
+      console.log('⏳ Esperando descarga en curso...');
+      return this._fetchInProgress;
+    }
+
+    // Descargar de GHL
+    this._fetchInProgress = this._fetchAllOpportunities();
+    try {
+      const result = await this._fetchInProgress;
+      this._cachedOpportunities = result;
+      this._cacheTimestamp = Date.now();
+      return result;
+    } finally {
+      this._fetchInProgress = null;
+    }
+  }
+
+  async _fetchAllOpportunities() {
     try {
       let allOpportunities = [];
       let hasMore = true;
@@ -56,7 +91,7 @@ class GHLService {
       let startAfter = null;
       let pageCount = 0;
 
-      console.log('Obteniendo oportunidades de GHL...');
+      console.log('🔽 Descargando oportunidades de GHL...');
 
       while (hasMore) {
         const params = { limit: 100 };
@@ -73,7 +108,7 @@ class GHLService {
         allOpportunities = [...allOpportunities, ...opportunities];
         pageCount++;
 
-        console.log(`Página ${pageCount}: ${opportunities.length} oportunidades (Total: ${allOpportunities.length})`);
+        console.log(`  Página ${pageCount}: ${opportunities.length} (Total: ${allOpportunities.length})`);
 
         const meta = response.data.meta;
         if (meta && meta.nextPage && opportunities.length === 100) {
@@ -84,7 +119,7 @@ class GHLService {
         }
       }
 
-      console.log(`Total oportunidades obtenidas: ${allOpportunities.length}`);
+      console.log(`✅ Total oportunidades: ${allOpportunities.length} (cacheado por 5 min)`);
       return allOpportunities;
     } catch (error) {
       console.error('Error obteniendo oportunidades:', error.message);

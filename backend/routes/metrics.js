@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const metricsService = require('../services/metricsService');
+const { getCachedMetrics, saveCachedMetrics } = require('../services/supabaseService');
 
 // Helper para obtener fechas del mes actual
 const getCurrentMonthRange = () => {
@@ -143,7 +144,7 @@ router.get('/trend', async (req, res) => {
   }
 });
 
-// Resumen completo (todas las métricas)
+// Resumen completo (todas las métricas) - con caché en Supabase
 router.get('/summary', async (req, res) => {
   try {
     const { startDate, endDate } = req.query;
@@ -151,24 +152,29 @@ router.get('/summary', async (req, res) => {
       ? { startDate, endDate }
       : getCurrentMonthRange();
 
-    const [funnel, stages, times, sources, trend] = await Promise.all([
-      metricsService.calculateFunnelMetrics(dateRange.startDate, dateRange.endDate),
-      metricsService.calculateStageDistribution(dateRange.startDate, dateRange.endDate),
-      metricsService.calculateAverageTimeInStages(dateRange.startDate, dateRange.endDate),
-      metricsService.calculateSourceMetrics(dateRange.startDate, dateRange.endDate),
-      metricsService.getDailyTrend(dateRange.startDate, dateRange.endDate)
-    ]);
+    // Intentar obtener datos del caché de Supabase
+    const cached = await getCachedMetrics(dateRange.startDate, dateRange.endDate);
+    if (cached) {
+      return res.json({
+        success: true,
+        dateRange,
+        source: 'cache',
+        data: cached
+      });
+    }
+
+    // Si no hay caché fresco, consultar GHL (una sola vez)
+    console.log(`🔄 Consultando GHL para ${dateRange.startDate} - ${dateRange.endDate}...`);
+    const data = await metricsService.calculateAllMetrics(dateRange.startDate, dateRange.endDate);
+
+    // Guardar en Supabase en background (no bloquea la respuesta)
+    saveCachedMetrics(dateRange.startDate, dateRange.endDate, data);
 
     res.json({
       success: true,
       dateRange,
-      data: {
-        funnel,
-        stages,
-        times,
-        sources,
-        trend
-      }
+      source: 'ghl',
+      data
     });
   } catch (error) {
     res.status(500).json({
