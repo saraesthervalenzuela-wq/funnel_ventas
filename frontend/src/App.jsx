@@ -9,6 +9,9 @@ import TrendChart from './components/TrendChart'
 import TimeMetrics from './components/TimeMetrics'
 import LoadingSpinner from './components/LoadingSpinner'
 import ErrorAlert from './components/ErrorAlert'
+import MetaCampaigns from './components/MetaCampaigns'
+import ReportBuilder from './components/ReportBuilder'
+import AnalysisView from './components/AnalysisView'
 import DarkVeil from './components/DarkVeil'
 import mockData from './mockData'
 
@@ -19,6 +22,7 @@ function App() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [data, setData] = useState(null)
+  const [activeView, setActiveView] = useState('dashboard')
   const [dateRange, setDateRange] = useState(() => {
     const now = new Date()
     const startDate = new Date(now.getFullYear(), now.getMonth(), 1)
@@ -29,7 +33,7 @@ function App() {
     }
   })
 
-  const fetchData = async () => {
+  const fetchData = async (force = false) => {
     setLoading(true)
     setError(null)
 
@@ -43,8 +47,10 @@ function App() {
 
     try {
       const axios = (await import('axios')).default
+      const params = { ...dateRange }
+      if (force) params.force = 'true'
       const response = await axios.get('/api/metrics/summary', {
-        params: dateRange
+        params
       })
 
       if (response.data.success) {
@@ -81,13 +87,38 @@ function App() {
   }
 
   const handleRefresh = () => {
-    fetchData()
+    fetchData(true)
   }
 
-  const currentMonth = new Date(dateRange.startDate).toLocaleDateString('es-MX', {
-    month: 'long',
-    year: 'numeric'
-  })
+  const dateLabel = (() => {
+    const [sY, sM, sD] = dateRange.startDate.split('-').map(Number)
+    const [eY, eM, eD] = dateRange.endDate.split('-').map(Number)
+
+    const startObj = new Date(sY, sM - 1, sD)
+    const endObj = new Date(eY, eM - 1, eD)
+
+    // Mismo día → "9 de Febrero de 2026"
+    if (dateRange.startDate === dateRange.endDate) {
+      return startObj.toLocaleDateString('es-MX', { day: 'numeric', month: 'long', year: 'numeric' })
+    }
+
+    // Mes completo (día 1 al último día del mes, mismo mes) → "Febrero de 2026"
+    const lastDayOfMonth = new Date(sY, sM, 0).getDate()
+    if (sD === 1 && eD === lastDayOfMonth && sM === eM && sY === eY) {
+      return startObj.toLocaleDateString('es-MX', { month: 'long', year: 'numeric' })
+    }
+
+    // Mismo mes → "3 al 10 de Febrero de 2026"
+    if (sM === eM && sY === eY) {
+      const monthYear = endObj.toLocaleDateString('es-MX', { month: 'long', year: 'numeric' })
+      return `${sD} al ${eD} de ${monthYear}`
+    }
+
+    // Diferentes meses → "3 de Enero al 10 de Febrero de 2026"
+    const startStr = startObj.toLocaleDateString('es-MX', { day: 'numeric', month: 'long' })
+    const endStr = endObj.toLocaleDateString('es-MX', { day: 'numeric', month: 'long', year: 'numeric' })
+    return `${startStr} al ${endStr}`
+  })()
 
   if (loading && !data) {
     return <LoadingSpinner />
@@ -147,8 +178,11 @@ function App() {
           onDateChange={handleDateChange}
           onRefresh={handleRefresh}
           loading={loading}
+          activeView={activeView}
+          onViewChange={setActiveView}
         />
 
+        {activeView === 'dashboard' && (
         <main className="w-full px-4 sm:px-6 lg:px-10 xl:px-16 py-6 sm:py-10 lg:py-12">
         {/* Hero Title Section */}
         <motion.div
@@ -158,7 +192,7 @@ function App() {
           className="mb-8 sm:mb-10 lg:mb-12"
         >
           <p className="text-[9px] sm:text-[10px] font-bold tracking-[0.3em] uppercase text-teal-400/60 mb-2 sm:mb-3 font-display">
-            {currentMonth}
+            {dateLabel}
           </p>
           <h1 className="text-3xl sm:text-4xl md:text-5xl lg:text-6xl font-extrabold tracking-tight font-display leading-tight">
             <span className="text-white/95">Funnel de Ventas </span>
@@ -167,9 +201,6 @@ function App() {
               Ciplastic
             </span>
           </h1>
-          <p className="mt-3 sm:mt-4 text-white/35 text-sm sm:text-base lg:text-lg max-w-2xl leading-relaxed">
-            Métricas en tiempo real de tu pipeline de ventas conectado a Go High Level
-          </p>
         </motion.div>
 
         {error && (
@@ -293,11 +324,44 @@ function App() {
                   <p className="text-base text-white/40 mt-2">Análisis de campañas y canales de adquisición</p>
                 </div>
               </div>
-              <SourcesTable sources={data.sources} />
+              <SourcesTable sources={data.sources} dateRange={dateRange} />
+            </motion.section>
+
+            {/* Campañas de Meta Ads */}
+            <motion.section
+              initial={{ opacity: 0, y: 60, scale: 0.95 }}
+              whileInView={{ opacity: 1, y: 0, scale: 1 }}
+              viewport={{ once: true, margin: "-50px" }}
+              transition={{ duration: 0.9, delay: 0.1, ease: [0.22, 1, 0.36, 1] }}
+              className="chart-card"
+            >
+              <div className="flex items-center justify-between mb-8">
+                <div>
+                  <h3 className="text-2xl font-bold text-white tracking-tight font-display">
+                    Campañas Meta Ads
+                  </h3>
+                  <p className="text-base text-white/40 mt-2">Rendimiento de Facebook e Instagram Ads</p>
+                </div>
+                <span className="badge badge-teal">Meta API</span>
+              </div>
+              <MetaCampaigns dateRange={dateRange} />
             </motion.section>
           </div>
         )}
       </main>
+        )}
+
+        {activeView === 'analisis' && (
+          <main className="w-full px-4 sm:px-6 lg:px-10 xl:px-16 py-6 sm:py-10 lg:py-12">
+            <AnalysisView data={data} dateRange={dateRange} dateLabel={dateLabel} />
+          </main>
+        )}
+
+        {activeView === 'reportes' && (
+          <main className="w-full px-4 sm:px-6 lg:px-10 xl:px-16 py-6 sm:py-10 lg:py-12">
+            <ReportBuilder data={data} dateRange={dateRange} dateLabel={dateLabel} />
+          </main>
+        )}
 
         {/* Footer */}
         <footer className="border-t border-white/[0.06] mt-16 py-8">

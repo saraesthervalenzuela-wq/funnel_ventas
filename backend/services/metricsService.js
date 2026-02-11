@@ -70,6 +70,11 @@ class MetricsService {
 
     console.log(`📊 Filtrado: ${opportunities.length} de ${allOpportunities.length} oportunidades para ${startDate} - ${endDate}`);
 
+    return this.calculateAllMetricsFromArray(opportunities);
+  }
+
+  // Calcular todas las métricas desde un array de oportunidades ya filtradas
+  calculateAllMetricsFromArray(opportunities) {
     return {
       funnel: this._buildFunnelMetrics(opportunities),
       stages: this._buildStageDistribution(opportunities),
@@ -302,36 +307,61 @@ class MetricsService {
     }
   }
 
+  // Determinar el canal a partir del source y tags
+  _getChannel(source, tagsJoined) {
+    const s = (source || '').toLowerCase();
+
+    // 1. Ads de Meta (Facebook/Instagram) — prioridad alta
+    if (tagsJoined.includes('fb-ad-lead') || tagsJoined.includes('fb-ad')) return 'Facebook Ads';
+    if (tagsJoined.includes('instagram-ad-lead') || tagsJoined.includes('instagram-ad')) return 'Instagram Ads';
+
+    // 2. Source explícito (cuando GHL sí lo tiene)
+    if (s.includes('facebook') || s.includes('fb')) return 'Facebook Ads';
+    if (s.includes('instagram')) return 'Instagram Ads';
+    if (s.includes('google')) return 'Google';
+    if (s.includes('tiktok') || tagsJoined.includes('tiktok')) return 'TikTok';
+
+    // 3. WhatsApp orgánico/directo (sin tag de ad)
+    if (s.includes('whatsapp') || tagsJoined.includes('inbound whatsapp') ||
+        tagsJoined.includes('wa:') || tagsJoined.includes('wazz') ||
+        tagsJoined.includes('whatsapp')) return 'WhatsApp';
+
+    // 4. Email/Correo
+    if (s.includes('email') || s.includes('correo') || tagsJoined.includes('correo')) return 'Correo';
+
+    // 5. Source con valor pero no reconocido
+    if (source) return 'Otros';
+
+    // 6. Sin source ni tags reconocibles
+    return 'Sin fuente';
+  }
+
   _buildSourceMetrics(opportunities) {
-    const sourceMetrics = {};
+    const channelMetrics = {};
 
     opportunities.forEach(opp => {
-      let source = opp.source || null;
+      const rawSource = opp.source || null;
+      const rawTags = opp.contact?.tags || [];
+      const tagsJoined = rawTags.join(' ').toLowerCase();
 
-      const tags = (opp.contact?.tags || []).join(' ').toLowerCase();
-      if (!source) {
-        if (tags.includes('fb-ad') || tags.includes('facebook')) {
-          source = 'Facebook Ads';
-        } else if (tags.includes('instagram-ad')) {
-          source = 'Instagram Ads';
-        } else if (tags.includes('inbound whatsapp')) {
-          source = 'WhatsApp Inbound';
-        } else {
-          source = 'Sin fuente';
-        }
-      }
+      // Agrupar por CANAL (Facebook, Instagram, WhatsApp, etc.)
+      const channel = this._getChannel(rawSource, tagsJoined);
 
-      if (!sourceMetrics[source]) {
-        sourceMetrics[source] = {
-          total: 0, calificados: 0, valoraciones: 0, depositos: 0, valorTotal: 0
+      // El nombre de campaña es el source original (o "Sin campaña" si no tiene)
+      const campaignName = rawSource || 'Sin campaña';
+
+      if (!channelMetrics[channel]) {
+        channelMetrics[channel] = {
+          total: 0, calificados: 0, valoraciones: 0, depositos: 0, valorTotal: 0,
+          _campaigns: {}
         };
       }
 
-      sourceMetrics[source].total++;
+      channelMetrics[channel].total++;
       const stageId = opp.pipelineStageId;
 
       if (stageId !== this.stageIds.nuevoLead) {
-        sourceMetrics[source].calificados++;
+        channelMetrics[channel].calificados++;
       }
 
       const stagesValoradas = [
@@ -341,23 +371,52 @@ class MetricsService {
         this.stageIds.fechaCirugia
       ];
       if (stagesValoradas.includes(stageId)) {
-        sourceMetrics[source].valoraciones++;
+        channelMetrics[channel].valoraciones++;
       }
 
       const stagesDeposito = [this.stageIds.depositoRealizado, this.stageIds.fechaCirugia];
-      if (stagesDeposito.includes(stageId)) {
-        sourceMetrics[source].depositos++;
-        sourceMetrics[source].valorTotal += parseFloat(opp.monetaryValue) || 0;
+      const isDeposito = stagesDeposito.includes(stageId);
+      if (isDeposito) {
+        channelMetrics[channel].depositos++;
+        channelMetrics[channel].valorTotal += parseFloat(opp.monetaryValue) || 0;
+      }
+
+      // Sub-agrupar por campaña (el source original)
+      if (!channelMetrics[channel]._campaigns[campaignName]) {
+        channelMetrics[channel]._campaigns[campaignName] = {
+          total: 0, calificados: 0, depositos: 0, valorTotal: 0
+        };
+      }
+      channelMetrics[channel]._campaigns[campaignName].total++;
+      if (stageId !== this.stageIds.nuevoLead) {
+        channelMetrics[channel]._campaigns[campaignName].calificados++;
+      }
+      if (isDeposito) {
+        channelMetrics[channel]._campaigns[campaignName].depositos++;
+        channelMetrics[channel]._campaigns[campaignName].valorTotal += parseFloat(opp.monetaryValue) || 0;
       }
     });
 
-    return Object.entries(sourceMetrics)
+    return Object.entries(channelMetrics)
       .map(([source, metrics]) => ({
         source,
-        ...metrics,
+        total: metrics.total,
+        calificados: metrics.calificados,
+        valoraciones: metrics.valoraciones,
+        depositos: metrics.depositos,
+        valorTotal: metrics.valorTotal,
         tasaConversion: metrics.total > 0
           ? ((metrics.depositos / metrics.total) * 100).toFixed(2)
-          : 0
+          : 0,
+        campaigns: Object.entries(metrics._campaigns)
+          .map(([campaign, cm]) => ({
+            campaign,
+            ...cm,
+            tasaConversion: cm.total > 0
+              ? ((cm.depositos / cm.total) * 100).toFixed(2)
+              : 0
+          }))
+          .sort((a, b) => b.total - a.total)
       }))
       .sort((a, b) => b.total - a.total);
   }

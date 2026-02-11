@@ -1,5 +1,5 @@
-import React from 'react'
-import { motion } from 'framer-motion'
+import React, { useState } from 'react'
+import { motion, AnimatePresence } from 'framer-motion'
 import {
   TrendingUp,
   TrendingDown,
@@ -13,8 +13,11 @@ import {
   Mail,
   MessageCircle,
   Megaphone,
-  Smartphone
+  Smartphone,
+  ChevronRight,
+  Loader2
 } from 'lucide-react'
+import CampaignDetail from './CampaignDetail'
 
 // Mapeo de iconos por fuente
 const SOURCE_ICONS = {
@@ -47,7 +50,60 @@ const getSourceIcon = (sourceName) => {
   return SOURCE_ICONS.default
 }
 
-function SourcesTable({ sources }) {
+function SourcesTable({ sources, dateRange }) {
+  const [selectedSource, setSelectedSource] = useState(null)
+  const [loadingMeta, setLoadingMeta] = useState(false)
+
+  const handleSourceClick = async (source) => {
+    // Para Facebook Ads, obtener desglose por campaña de Meta
+    if (source.source === 'Facebook Ads' && dateRange) {
+      setLoadingMeta(true)
+      try {
+        const axios = (await import('axios')).default
+        const response = await axios.get('/api/meta/campaigns', {
+          params: { startDate: dateRange.startDate, endDate: dateRange.endDate }
+        })
+        if (response.data.success) {
+          const metaData = response.data.data
+          const metaCampaigns = metaData.campaigns
+          const ghlTotals = metaData.ghlTotals || {}
+
+          // Usar datos reales de la API de Meta (ghlLeads ya distribuidos proporcionalmente)
+          const enrichedCampaigns = metaCampaigns.map(c => ({
+            campaign: c.campaignName,
+            total: c.ghlLeads || 0,
+            calificados: c.ghlCalificados || 0,
+            depositos: c.ghlCierres || 0,
+            valorTotal: c.ghlValor || 0,
+            tasaConversion: c.ghlConversion || '0.0',
+            metaConversations: c.leads,
+            metaSpend: c.spend,
+            metaCPL: c.costPerLead
+          })).sort((a, b) => b.total - a.total)
+
+          setSelectedSource({
+            ...source,
+            total: ghlTotals.total || 0,
+            calificados: ghlTotals.calificados || 0,
+            depositos: ghlTotals.cierres || 0,
+            valorTotal: ghlTotals.valor || 0,
+            campaigns: enrichedCampaigns,
+            isMeta: true
+          })
+        } else {
+          setSelectedSource(source)
+        }
+      } catch (err) {
+        console.error('Error fetching Meta campaigns:', err)
+        setSelectedSource(source)
+      } finally {
+        setLoadingMeta(false)
+      }
+    } else {
+      setSelectedSource(source)
+    }
+  }
+
   if (!sources || sources.length === 0) {
     return (
       <motion.div
@@ -154,13 +210,14 @@ function SourcesTable({ sources }) {
             return (
               <motion.tr
                 key={index}
-                className="group cursor-default"
+                className="group cursor-pointer"
                 style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.03)' }}
                 custom={index}
                 variants={rowVariants}
                 initial="hidden"
                 whileInView="visible"
                 viewport={{ once: true, margin: "-20px" }}
+                onClick={() => handleSourceClick(source)}
                 whileHover={{
                   backgroundColor: 'rgba(255, 255, 255, 0.03)',
                   transition: { duration: 0.2 }
@@ -184,6 +241,11 @@ function SourcesTable({ sources }) {
                     <span className="font-semibold text-white/90 text-base group-hover:text-white transition-colors">
                       {source.source}
                     </span>
+                    {loadingMeta && source.source === 'Facebook Ads' ? (
+                      <Loader2 className="w-4 h-4 text-teal-400 animate-spin ml-auto" />
+                    ) : (
+                      <ChevronRight className="w-4 h-4 text-white/0 group-hover:text-white/40 transition-all ml-auto" />
+                    )}
                   </div>
                 </td>
                 <td className="py-5 px-5 text-center">
@@ -271,6 +333,15 @@ function SourcesTable({ sources }) {
           </span>
         </motion.div>
       </motion.div>
+
+      <AnimatePresence>
+        {selectedSource && (
+          <CampaignDetail
+            source={selectedSource}
+            onClose={() => setSelectedSource(null)}
+          />
+        )}
+      </AnimatePresence>
     </motion.div>
   )
 }

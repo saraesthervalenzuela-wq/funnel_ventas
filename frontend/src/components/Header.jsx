@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
 import { RefreshCw, Calendar, TrendingUp, Sparkles } from 'lucide-react'
 
-function Header({ dateRange, onDateChange, onRefresh, loading }) {
+function Header({ dateRange, onDateChange, onRefresh, loading, activeView, onViewChange }) {
   const [activePreset, setActivePreset] = useState(null)
   const [showRangePicker, setShowRangePicker] = useState(false)
 
@@ -48,11 +48,11 @@ function Header({ dateRange, onDateChange, onRefresh, loading }) {
         endDate = formatDate(now)
         break
       case 'month':
-        // Mes calendario actual (del 1ro al último día del mes)
-        const firstDay = new Date(now.getFullYear(), now.getMonth(), 1)
-        const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0)
-        startDate = formatDate(firstDay)
-        endDate = formatDate(lastDay)
+        // Últimos 30 días desde hoy (ej: 9 ene → 9 feb)
+        const monthStart = new Date(now)
+        monthStart.setMonth(now.getMonth() - 1)
+        startDate = formatDate(monthStart)
+        endDate = formatDate(now)
         break
       default:
         return
@@ -94,19 +94,25 @@ function Header({ dateRange, onDateChange, onRefresh, loading }) {
                  background: 'rgba(255, 255, 255, 0.03)',
                  border: '1px solid rgba(255, 255, 255, 0.06)'
                }}>
-            <button className="px-5 py-2 rounded-xl text-sm font-semibold transition-all duration-300"
-                    style={{
-                      background: 'linear-gradient(135deg, #14b8a6 0%, #0ea5e9 100%)',
-                      boxShadow: '0 0 20px rgba(20, 184, 166, 0.3)'
-                    }}>
-              Dashboard
-            </button>
-            <button className="px-5 py-2 rounded-xl text-white/40 text-sm font-medium hover:text-white hover:bg-white/[0.04] transition-all duration-300">
-              Reportes
-            </button>
-            <button className="px-5 py-2 rounded-xl text-white/40 text-sm font-medium hover:text-white hover:bg-white/[0.04] transition-all duration-300">
-              Análisis
-            </button>
+            {[
+              { key: 'dashboard', label: 'Dashboard' },
+              { key: 'reportes', label: 'Reportes' },
+              { key: 'analisis', label: 'Análisis' },
+            ].map(tab => (
+              <button
+                key={tab.key}
+                onClick={() => onViewChange(tab.key)}
+                className={`px-5 py-2 rounded-xl text-sm font-semibold transition-all duration-300 ${
+                  activeView !== tab.key ? 'text-white/40 font-medium hover:text-white hover:bg-white/[0.04]' : ''
+                }`}
+                style={activeView === tab.key ? {
+                  background: 'linear-gradient(135deg, #14b8a6 0%, #0ea5e9 100%)',
+                  boxShadow: '0 0 20px rgba(20, 184, 166, 0.3)'
+                } : {}}
+              >
+                {tab.label}
+              </button>
+            ))}
           </nav>
 
           {/* Derecha - Controles */}

@@ -1,7 +1,14 @@
 const express = require('express');
 const router = express.Router();
 const metricsService = require('../services/metricsService');
-const { getCachedMetrics, saveCachedMetrics } = require('../services/supabaseService');
+const {
+  getLatestSnapshot,
+  insertSnapshot,
+  getOpportunitiesFromDB,
+  getOpportunityCount,
+  performSync,
+  getLastSyncInfo
+} = require('../services/supabaseService');
 
 // Helper para obtener fechas del mes actual
 const getCurrentMonthRange = () => {
@@ -144,43 +151,104 @@ router.get('/trend', async (req, res) => {
   }
 });
 
-// Resumen completo (todas las métricas) - con caché en Supabase
+// Resumen completo — lee de Supabase DB, sync solo con force=true
 router.get('/summary', async (req, res) => {
   try {
-    const { startDate, endDate } = req.query;
+    const { startDate, endDate, force } = req.query;
     const dateRange = startDate && endDate
       ? { startDate, endDate }
       : getCurrentMonthRange();
 
-    // Intentar obtener datos del caché de Supabase
-    const cached = await getCachedMetrics(dateRange.startDate, dateRange.endDate);
-    if (cached) {
+    const forceRefresh = force === 'true';
+
+    // === FORCE: Sync completo desde GHL ===
+    if (forceRefresh) {
+      console.log('🔄 Refresh forzado — ejecutando sync completo...');
+      const syncResult = await performSync('manual');
+
+      // Leer oportunidades frescas de la DB y filtrar con timezone local
+      const rawOpps = await getOpportunitiesFromDB(dateRange.startDate, dateRange.endDate);
+      const opportunities = metricsService.filterByDateRange(rawOpps, dateRange.startDate, dateRange.endDate);
+      const data = metricsService.calculateAllMetricsFromArray(opportunities);
+
+      // Guardar snapshot para este rango específico
+      await insertSnapshot(dateRange.startDate, dateRange.endDate, 'manual', data, opportunities.length);
+
       return res.json({
         success: true,
         dateRange,
-        source: 'cache',
-        data: cached
+        source: 'sync',
+        syncInfo: {
+          total: syncResult.total,
+          new: syncResult.new,
+          updated: syncResult.updated,
+          duration: syncResult.duration
+        },
+        data
       });
     }
 
-    // Si no hay caché fresco, consultar GHL (una sola vez)
-    console.log(`🔄 Consultando GHL para ${dateRange.startDate} - ${dateRange.endDate}...`);
-    const data = await metricsService.calculateAllMetrics(dateRange.startDate, dateRange.endDate);
+    // === NORMAL: Intentar snapshot reciente ===
+    const snapshot = await getLatestSnapshot(dateRange.startDate, dateRange.endDate);
+    if (snapshot) {
+      return res.json({
+        success: true,
+        dateRange,
+        source: 'snapshot',
+        data: snapshot
+      });
+    }
 
-    // Guardar en Supabase en background (no bloquea la respuesta)
-    saveCachedMetrics(dateRange.startDate, dateRange.endDate, data);
+    // === Sin snapshot: Leer de tabla opportunities ===
+    const dbCount = await getOpportunityCount();
+
+    if (dbCount === 0) {
+      // Primera vez — hacer bootstrap sync
+      console.log('🚀 DB vacía — ejecutando sync inicial (bootstrap)...');
+      await performSync('bootstrap');
+    }
+
+    // Leer oportunidades del rango desde DB y filtrar con timezone local
+    const rawOpps = await getOpportunitiesFromDB(dateRange.startDate, dateRange.endDate);
+    const opportunities = metricsService.filterByDateRange(rawOpps, dateRange.startDate, dateRange.endDate);
+    const data = metricsService.calculateAllMetricsFromArray(opportunities);
+
+    // Guardar snapshot
+    await insertSnapshot(dateRange.startDate, dateRange.endDate, 'query', data, opportunities.length);
 
     res.json({
       success: true,
       dateRange,
-      source: 'ghl',
+      source: 'database',
       data
     });
+
   } catch (error) {
+    console.error('❌ Error en /summary:', error.message);
     res.status(500).json({
       success: false,
       error: error.message
     });
+  }
+});
+
+// Info del último sync
+router.get('/sync-info', async (req, res) => {
+  try {
+    const info = await getLastSyncInfo();
+    res.json({ success: true, data: info });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Trigger sync manual
+router.post('/sync', async (req, res) => {
+  try {
+    const result = await performSync('manual');
+    res.json({ success: true, data: result });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 

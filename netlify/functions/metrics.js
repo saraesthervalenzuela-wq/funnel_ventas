@@ -11,7 +11,7 @@ const supabase = createClient(
   process.env.SUPABASE_ANON_KEY
 );
 
-const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutos
+const SNAPSHOT_TTL_MS = 5 * 60 * 1000; // 5 minutos
 
 // ============================================
 // GHL SERVICE (inline para serverless)
@@ -71,36 +71,158 @@ async function fetchAllOpportunities() {
 }
 
 // ============================================
-// SUPABASE CACHE
+// SUPABASE DB FUNCTIONS
 // ============================================
-async function getCachedMetrics(startDate, endDate) {
+
+function mapOppToDB(opp) {
+  return {
+    id: opp.id,
+    pipeline_stage_id: opp.pipelineStageId,
+    contact_id: opp.contact?.id || null,
+    contact_name: opp.contact?.name || opp.contact?.firstName
+      ? `${opp.contact?.firstName || ''} ${opp.contact?.lastName || ''}`.trim()
+      : null,
+    contact_email: opp.contact?.email || null,
+    contact_phone: opp.contact?.phone || null,
+    contact_tags: opp.contact?.tags || [],
+    created_at: opp.createdAt || opp.dateAdded,
+    updated_at: opp.updatedAt || opp.lastStatusChangeAt || null,
+    monetary_value: parseFloat(opp.monetaryValue) || 0,
+    source: opp.source || null,
+    status: opp.status || 'open',
+    raw_json: opp,
+    synced_at: new Date().toISOString()
+  };
+}
+
+function mapOppFromDB(row) {
+  return {
+    id: row.id,
+    pipelineStageId: row.pipeline_stage_id,
+    createdAt: row.created_at,
+    dateAdded: row.created_at,
+    updatedAt: row.updated_at,
+    monetaryValue: row.monetary_value,
+    source: row.source,
+    status: row.status,
+    contact: {
+      id: row.contact_id,
+      name: row.contact_name,
+      email: row.contact_email,
+      phone: row.contact_phone,
+      tags: row.contact_tags || []
+    }
+  };
+}
+
+async function upsertOpportunities(opportunities) {
+  const BATCH_SIZE = 100;
+  let newCount = 0;
+  let updatedCount = 0;
+
+  for (let i = 0; i < opportunities.length; i += BATCH_SIZE) {
+    const batch = opportunities.slice(i, i + BATCH_SIZE);
+    const rows = batch.map(mapOppToDB);
+
+    const ids = rows.map(r => r.id);
+    const { data: existing } = await supabase
+      .from('opportunities')
+      .select('id')
+      .in('id', ids);
+
+    const existingIds = new Set((existing || []).map(e => e.id));
+    newCount += rows.filter(r => !existingIds.has(r.id)).length;
+    updatedCount += rows.length - rows.filter(r => !existingIds.has(r.id)).length;
+
+    const { error } = await supabase
+      .from('opportunities')
+      .upsert(rows, { onConflict: 'id' });
+
+    if (error) throw error;
+  }
+
+  return { total: opportunities.length, new: newCount, updated: updatedCount };
+}
+
+async function getOpportunitiesFromDB(startDate, endDate) {
+  // Buffer de 1 día para compensar timezone (UTC vs local)
+  const start = new Date(startDate);
+  start.setDate(start.getDate() - 1);
+  const end = new Date(endDate);
+  end.setDate(end.getDate() + 1);
+  const startISO = start.toISOString().split('T')[0] + 'T00:00:00';
+  const endISO = end.toISOString().split('T')[0] + 'T23:59:59';
+
+  let allRows = [];
+  let from = 0;
+  const PAGE_SIZE = 1000;
+
+  while (true) {
+    const { data, error } = await supabase
+      .from('opportunities')
+      .select('*')
+      .gte('created_at', startISO)
+      .lte('created_at', endISO)
+      .range(from, from + PAGE_SIZE - 1);
+
+    if (error) throw error;
+    allRows = allRows.concat(data || []);
+    if (!data || data.length < PAGE_SIZE) break;
+    from += PAGE_SIZE;
+  }
+
+  return allRows.map(mapOppFromDB);
+}
+
+async function getOpportunityCount() {
+  const { count, error } = await supabase
+    .from('opportunities')
+    .select('*', { count: 'exact', head: true });
+  if (error) return 0;
+  return count || 0;
+}
+
+async function getLatestSnapshot(startDate, endDate) {
+  const cutoff = new Date(Date.now() - SNAPSHOT_TTL_MS).toISOString();
+
   const { data, error } = await supabase
-    .from('metrics_cache')
-    .select('data, fetched_at')
+    .from('metrics_snapshots')
+    .select('*')
     .eq('start_date', startDate)
     .eq('end_date', endDate)
+    .gte('created_at', cutoff)
+    .order('created_at', { ascending: false })
+    .limit(1)
     .single();
 
   if (error || !data) return null;
-
-  const age = Date.now() - new Date(data.fetched_at).getTime();
-  if (age > CACHE_TTL_MS) return null;
-
-  return data.data;
+  return {
+    funnel: data.funnel,
+    stages: data.stages,
+    times: data.times,
+    sources: data.sources,
+    trend: data.trend
+  };
 }
 
-async function saveCachedMetrics(startDate, endDate, metricsData) {
+async function insertSnapshot(startDate, endDate, syncType, metricsData, oppCount) {
   await supabase
-    .from('metrics_cache')
-    .upsert(
-      {
-        start_date: startDate,
-        end_date: endDate,
-        data: metricsData,
-        fetched_at: new Date().toISOString()
-      },
-      { onConflict: 'start_date,end_date' }
-    );
+    .from('metrics_snapshots')
+    .insert({
+      start_date: startDate,
+      end_date: endDate,
+      sync_type: syncType,
+      funnel: metricsData.funnel,
+      stages: metricsData.stages,
+      times: metricsData.times,
+      sources: metricsData.sources,
+      trend: metricsData.trend,
+      opportunity_count: oppCount
+    });
+}
+
+async function insertSyncLog(entry) {
+  await supabase.from('sync_log').insert(entry).catch(() => {});
 }
 
 // ============================================
@@ -245,27 +367,65 @@ function buildAverageTimes(opportunities) {
   };
 }
 
+function getChannel(source, tagsJoined) {
+  const s = (source || '').toLowerCase();
+
+  // 1. Ads de Meta (Facebook/Instagram) — prioridad alta
+  if (tagsJoined.includes('fb-ad-lead') || tagsJoined.includes('fb-ad')) return 'Facebook Ads';
+  if (tagsJoined.includes('instagram-ad-lead') || tagsJoined.includes('instagram-ad')) return 'Instagram Ads';
+
+  // 2. Source explícito
+  if (s.includes('facebook') || s.includes('fb')) return 'Facebook Ads';
+  if (s.includes('instagram')) return 'Instagram Ads';
+  if (s.includes('google')) return 'Google';
+  if (s.includes('tiktok') || tagsJoined.includes('tiktok')) return 'TikTok';
+
+  // 3. WhatsApp orgánico/directo (sin tag de ad)
+  if (s.includes('whatsapp') || tagsJoined.includes('inbound whatsapp') ||
+      tagsJoined.includes('wa:') || tagsJoined.includes('wazz') ||
+      tagsJoined.includes('whatsapp')) return 'WhatsApp';
+
+  // 4. Email/Correo
+  if (s.includes('email') || s.includes('correo') || tagsJoined.includes('correo')) return 'Correo';
+
+  // 5. Source con valor pero no reconocido
+  if (source) return 'Otros';
+
+  // 6. Sin source ni tags reconocibles
+  return 'Sin fuente';
+}
+
 function buildSourceMetrics(opportunities) {
-  const sourceMetrics = {};
+  const channelMetrics = {};
+
   opportunities.forEach(opp => {
-    let source = opp.source || null;
-    const tags = (opp.contact?.tags || []).join(' ').toLowerCase();
-    if (!source) {
-      if (tags.includes('fb-ad') || tags.includes('facebook')) source = 'Facebook Ads';
-      else if (tags.includes('instagram-ad')) source = 'Instagram Ads';
-      else if (tags.includes('inbound whatsapp')) source = 'WhatsApp Inbound';
-      else source = 'Sin fuente';
-    }
-    if (!sourceMetrics[source]) sourceMetrics[source] = { total: 0, calificados: 0, valoraciones: 0, depositos: 0, valorTotal: 0 };
-    sourceMetrics[source].total++;
-    if (opp.pipelineStageId !== stageIds.nuevoLead) sourceMetrics[source].calificados++;
+    const rawSource = opp.source || null;
+    const rawTags = opp.contact?.tags || [];
+    const tagsJoined = rawTags.join(' ').toLowerCase();
+    const channel = getChannel(rawSource, tagsJoined);
+    const campaignName = rawSource || 'Sin campaña';
+
+    if (!channelMetrics[channel]) channelMetrics[channel] = { total: 0, calificados: 0, valoraciones: 0, depositos: 0, valorTotal: 0, _campaigns: {} };
+    channelMetrics[channel].total++;
+    const stageId = opp.pipelineStageId;
+    if (stageId !== stageIds.nuevoLead) channelMetrics[channel].calificados++;
     const sv = [stageIds.valoracionRealizada, stageIds.seguimientoCierre, stageIds.depositoRealizado, stageIds.fechaCirugia];
-    if (sv.includes(opp.pipelineStageId)) sourceMetrics[source].valoraciones++;
+    if (sv.includes(stageId)) channelMetrics[channel].valoraciones++;
     const sd = [stageIds.depositoRealizado, stageIds.fechaCirugia];
-    if (sd.includes(opp.pipelineStageId)) { sourceMetrics[source].depositos++; sourceMetrics[source].valorTotal += parseFloat(opp.monetaryValue) || 0; }
+    const isDeposito = sd.includes(stageId);
+    if (isDeposito) { channelMetrics[channel].depositos++; channelMetrics[channel].valorTotal += parseFloat(opp.monetaryValue) || 0; }
+
+    if (!channelMetrics[channel]._campaigns[campaignName]) channelMetrics[channel]._campaigns[campaignName] = { total: 0, calificados: 0, depositos: 0, valorTotal: 0 };
+    channelMetrics[channel]._campaigns[campaignName].total++;
+    if (stageId !== stageIds.nuevoLead) channelMetrics[channel]._campaigns[campaignName].calificados++;
+    if (isDeposito) { channelMetrics[channel]._campaigns[campaignName].depositos++; channelMetrics[channel]._campaigns[campaignName].valorTotal += parseFloat(opp.monetaryValue) || 0; }
   });
-  return Object.entries(sourceMetrics).map(([source, m]) => ({
-    source, ...m, tasaConversion: m.total > 0 ? ((m.depositos / m.total) * 100).toFixed(2) : 0
+  return Object.entries(channelMetrics).map(([source, m]) => ({
+    source, total: m.total, calificados: m.calificados, valoraciones: m.valoraciones, depositos: m.depositos, valorTotal: m.valorTotal,
+    tasaConversion: m.total > 0 ? ((m.depositos / m.total) * 100).toFixed(2) : 0,
+    campaigns: Object.entries(m._campaigns).map(([campaign, cm]) => ({
+      campaign, ...cm, tasaConversion: cm.total > 0 ? ((cm.depositos / cm.total) * 100).toFixed(2) : 0
+    })).sort((a, b) => b.total - a.total)
   })).sort((a, b) => b.total - a.total);
 }
 
@@ -282,6 +442,16 @@ function buildDailyTrend(opportunities) {
     if (sd.includes(opp.pipelineStageId)) dailyData[key].depositos++;
   });
   return Object.entries(dailyData).map(([date, data]) => ({ date, ...data })).sort((a, b) => new Date(a.date) - new Date(b.date));
+}
+
+function calculateAllMetrics(opportunities) {
+  return {
+    funnel: buildFunnelMetrics(opportunities),
+    stages: buildStageDistribution(opportunities),
+    times: buildAverageTimes(opportunities),
+    sources: buildSourceMetrics(opportunities),
+    trend: buildDailyTrend(opportunities)
+  };
 }
 
 // ============================================
@@ -307,7 +477,6 @@ exports.handler = async (event) => {
   }
 
   try {
-    // Determinar el endpoint desde el path
     const path = event.path.replace('/.netlify/functions/metrics', '').replace('/api/metrics', '').replace(/^\//, '');
     const params = event.queryStringParameters || {};
 
@@ -317,39 +486,103 @@ exports.handler = async (event) => {
       ? { startDate, endDate }
       : getCurrentMonthRange();
 
-    // Para el endpoint /summary (el principal que usa el dashboard)
+    // /summary — endpoint principal del dashboard
     if (path === 'summary' || path === '' || !path) {
-      // Intentar caché de Supabase primero
-      const cached = await getCachedMetrics(dateRange.startDate, dateRange.endDate);
-      if (cached) {
+      const forceRefresh = params.force === 'true';
+
+      // === FORCE: Sync completo desde GHL ===
+      if (forceRefresh) {
+        const startTime = Date.now();
+
+        // 1. Descargar de GHL
+        const allOpportunities = await fetchAllOpportunities();
+
+        // 2. Upsert en Supabase
+        const upsertResult = await upsertOpportunities(allOpportunities);
+
+        // 3. Calcular métricas para el rango solicitado
+        const filtered = filterByDateRange(allOpportunities, dateRange.startDate, dateRange.endDate);
+        const data = calculateAllMetrics(filtered);
+
+        // 4. Guardar snapshot
+        await insertSnapshot(dateRange.startDate, dateRange.endDate, 'manual', data, filtered.length);
+
+        // 5. Log
+        const duration = Date.now() - startTime;
+        insertSyncLog({
+          sync_type: 'manual',
+          status: 'success',
+          opportunities_total: allOpportunities.length,
+          opportunities_new: upsertResult.new,
+          opportunities_updated: upsertResult.updated,
+          duration_ms: duration
+        });
+
         return {
           statusCode: 200, headers,
-          body: JSON.stringify({ success: true, dateRange, source: 'cache', data: cached })
+          body: JSON.stringify({
+            success: true, dateRange, source: 'sync',
+            syncInfo: { total: upsertResult.total, new: upsertResult.new, updated: upsertResult.updated, duration },
+            data
+          })
         };
       }
 
-      // Consultar GHL
-      const allOpportunities = await fetchAllOpportunities();
-      const opportunities = filterByDateRange(allOpportunities, dateRange.startDate, dateRange.endDate);
+      // === NORMAL: Intentar snapshot reciente ===
+      const snapshot = await getLatestSnapshot(dateRange.startDate, dateRange.endDate);
+      if (snapshot) {
+        return {
+          statusCode: 200, headers,
+          body: JSON.stringify({ success: true, dateRange, source: 'snapshot', data: snapshot })
+        };
+      }
 
-      const data = {
-        funnel: buildFunnelMetrics(opportunities),
-        stages: buildStageDistribution(opportunities),
-        times: buildAverageTimes(opportunities),
-        sources: buildSourceMetrics(opportunities),
-        trend: buildDailyTrend(opportunities)
-      };
+      // === Sin snapshot: Leer de tabla opportunities ===
+      const dbCount = await getOpportunityCount();
 
-      // Guardar en caché (no bloquear)
-      saveCachedMetrics(dateRange.startDate, dateRange.endDate, data).catch(() => {});
+      if (dbCount === 0) {
+        // Primera vez — descargar de GHL y poblar DB
+        const allOpportunities = await fetchAllOpportunities();
+        await upsertOpportunities(allOpportunities);
+
+        const filtered = filterByDateRange(allOpportunities, dateRange.startDate, dateRange.endDate);
+        const data = calculateAllMetrics(filtered);
+        await insertSnapshot(dateRange.startDate, dateRange.endDate, 'bootstrap', data, filtered.length);
+
+        return {
+          statusCode: 200, headers,
+          body: JSON.stringify({ success: true, dateRange, source: 'bootstrap', data })
+        };
+      }
+
+      // Leer de DB y filtrar con timezone local
+      const rawOpps = await getOpportunitiesFromDB(dateRange.startDate, dateRange.endDate);
+      const opportunities = filterByDateRange(rawOpps, dateRange.startDate, dateRange.endDate);
+      const data = calculateAllMetrics(opportunities);
+      insertSnapshot(dateRange.startDate, dateRange.endDate, 'query', data, opportunities.length).catch(() => {});
 
       return {
         statusCode: 200, headers,
-        body: JSON.stringify({ success: true, dateRange, source: 'ghl', data })
+        body: JSON.stringify({ success: true, dateRange, source: 'database', data })
       };
     }
 
-    // Endpoints individuales
+    // /sync-info
+    if (path === 'sync-info') {
+      const { data, error } = await supabase
+        .from('sync_log')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single();
+
+      return {
+        statusCode: 200, headers,
+        body: JSON.stringify({ success: true, data: error ? null : data })
+      };
+    }
+
+    // Endpoints individuales (fallback directo a GHL)
     const allOpportunities = await fetchAllOpportunities();
     const opportunities = filterByDateRange(allOpportunities, dateRange.startDate, dateRange.endDate);
 
