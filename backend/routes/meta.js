@@ -30,20 +30,26 @@ router.get('/campaigns', async (req, res) => {
       const source = (opp.source || '').toLowerCase();
       return tags.includes('fb-ad-lead') || tags.includes('fb-ad') ||
              tags.includes('instagram-ad-lead') || tags.includes('instagram-ad') ||
+             tags.includes('messenger') ||
              source.includes('facebook') || source.includes('fb') ||
              source.includes('instagram');
     });
 
     // Calcular métricas del funnel GHL para leads de Meta
+    // Nota: Usamos atribución proporcional para cierres porque muchos leads
+    // pierden sus tags de Meta al avanzar por el pipeline en GHL
     const stageIds = metricsService.stageIds;
     const stagesDeposito = [stageIds.depositoRealizado, stageIds.fechaCirugia];
+
+    const metaProportion = opportunities.length > 0 ? metaOpps.length / opportunities.length : 0;
+    const allCierres = opportunities.filter(o => stagesDeposito.includes(o.pipelineStageId));
+    const allCierresValor = allCierres.reduce((sum, o) => sum + (parseFloat(o.monetaryValue) || 0), 0);
 
     const ghlTotals = {
       total: metaOpps.length,
       calificados: metaOpps.filter(o => o.pipelineStageId !== stageIds.nuevoLead).length,
-      cierres: metaOpps.filter(o => stagesDeposito.includes(o.pipelineStageId)).length,
-      valor: metaOpps.filter(o => stagesDeposito.includes(o.pipelineStageId))
-        .reduce((sum, o) => sum + (parseFloat(o.monetaryValue) || 0), 0)
+      cierres: Math.round(allCierres.length * metaProportion),
+      valor: Math.round(allCierresValor * metaProportion)
     };
 
     // Distribuir métricas GHL proporcionalmente entre campañas de Meta
