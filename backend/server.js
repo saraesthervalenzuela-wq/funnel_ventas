@@ -45,16 +45,13 @@ app.listen(PORT, () => {
   console.log(`🚀 Servidor corriendo en http://localhost:${PORT}`);
   console.log(`📊 Dashboard disponible en http://localhost:${PORT}`);
 
-  // Sync inicial al arrancar (con delay de 5s para dejar que todo se inicialice)
-  setTimeout(async () => {
-    try {
-      console.log('🚀 Ejecutando sync inicial...');
-      await performSync('startup');
-      console.log('✅ Sync inicial completado');
-    } catch (err) {
-      console.error('⚠️ Sync inicial falló (el dashboard seguirá funcionando):', err.message);
-    }
-  }, 5000);
+  // Sync inicial al arrancar (no bloquea el servidor)
+  setTimeout(() => {
+    console.log('🚀 Ejecutando sync inicial...');
+    performSync('startup')
+      .then(() => console.log('✅ Sync inicial completado'))
+      .catch(err => console.error('⚠️ Sync inicial falló (el dashboard seguirá funcionando):', err.message));
+  }, 2000);
 
   // Auto-sync cada 5 minutos
   cron.schedule('*/5 * * * *', async () => {
