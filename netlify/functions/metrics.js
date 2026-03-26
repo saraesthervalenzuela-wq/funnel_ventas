@@ -487,10 +487,30 @@ exports.handler = async (event) => {
       ? { startDate: params.startDate, endDate: params.endDate }
       : getCurrentMonthRange();
 
-    // /current-stages — snapshot actual sin filtro de fecha
+    // /current-stages — snapshot actual sin filtro de fecha (lee de Supabase)
     if (path === 'current-stages') {
-      const allOpportunities = await fetchAllOpportunities();
-      const data = buildCurrentSnapshot(allOpportunities);
+      let allRows = [];
+      let from = 0;
+      const PAGE_SIZE = 1000;
+      while (true) {
+        const { data: rows, error } = await supabase
+          .from('opportunities')
+          .select('id, pipeline_stage_id, raw_json')
+          .range(from, from + PAGE_SIZE - 1);
+        if (error) throw error;
+        allRows = allRows.concat(rows || []);
+        if (!rows || rows.length < PAGE_SIZE) break;
+        from += PAGE_SIZE;
+      }
+
+      const opps = allRows.map(row => ({
+        pipelineStageId: row.pipeline_stage_id,
+        lastStageChangeAt: row.raw_json?.lastStageChangeAt || row.raw_json?.lastStatusChangeAt,
+        lastStatusChangeAt: row.raw_json?.lastStatusChangeAt,
+        createdAt: row.raw_json?.createdAt
+      }));
+
+      const data = buildCurrentSnapshot(opps);
       return { statusCode: 200, headers, body: JSON.stringify({ success: true, data }) };
     }
 
@@ -500,24 +520,62 @@ exports.handler = async (event) => {
       return { statusCode: 200, headers, body: JSON.stringify({ success: true, data }) };
     }
 
-    // /summary — endpoint principal
+    // /summary — endpoint principal (usa snapshots de Supabase para evitar timeout)
     if (path === 'summary' || path === '' || !path) {
-      // Descargar todas las oportunidades de GHL
-      const allOpportunities = await fetchAllOpportunities();
+      // 1. Intentar snapshot reciente (< 5 min)
+      const snapshot = await getLatestSnapshot(dateRange.startDate, dateRange.endDate);
+      if (snapshot) {
+        return {
+          statusCode: 200, headers,
+          body: JSON.stringify({ success: true, dateRange, source: 'snapshot', data: snapshot })
+        };
+      }
 
-      // Sync a Supabase en background (no bloquea la respuesta)
-      upsertOpportunities(allOpportunities).catch(() => {});
+      // 2. Sin snapshot: leer oportunidades de Supabase DB
+      let allRows = [];
+      let from = 0;
+      const PAGE_SIZE = 1000;
+      while (true) {
+        const { data: rows, error } = await supabase
+          .from('opportunities')
+          .select('*')
+          .range(from, from + PAGE_SIZE - 1);
+        if (error) throw error;
+        allRows = allRows.concat(rows || []);
+        if (!rows || rows.length < PAGE_SIZE) break;
+        from += PAGE_SIZE;
+      }
 
-      // Filtrar por periodo y calcular métricas
-      const filtered = filterByDateRange(allOpportunities, dateRange.startDate, dateRange.endDate);
+      if (allRows.length === 0) {
+        return {
+          statusCode: 200, headers,
+          body: JSON.stringify({ success: true, dateRange, source: 'empty', data: calculateAllMetrics([]) })
+        };
+      }
+
+      // Mapear de DB y extraer lastStageChangeAt de raw_json
+      const opportunities = allRows.map(row => {
+        const raw = row.raw_json || {};
+        return {
+          id: row.id, pipelineStageId: row.pipeline_stage_id,
+          createdAt: row.created_at, dateAdded: row.created_at,
+          updatedAt: row.updated_at, monetaryValue: row.monetary_value,
+          source: row.source, status: row.status,
+          lastStageChangeAt: raw.lastStageChangeAt || raw.lastStatusChangeAt || row.updated_at,
+          lastStatusChangeAt: raw.lastStatusChangeAt || row.updated_at,
+          contact: { id: row.contact_id, name: row.contact_name, email: row.contact_email, phone: row.contact_phone, tags: row.contact_tags || [] }
+        };
+      });
+
+      const filtered = filterByDateRange(opportunities, dateRange.startDate, dateRange.endDate);
       const data = calculateAllMetrics(filtered);
 
-      // Guardar snapshot en background
+      // Guardar snapshot para próximas consultas
       insertSnapshot(dateRange.startDate, dateRange.endDate, 'query', data, filtered.length);
 
       return {
         statusCode: 200, headers,
-        body: JSON.stringify({ success: true, dateRange, source: 'ghl', data })
+        body: JSON.stringify({ success: true, dateRange, source: 'database', data })
       };
     }
 
