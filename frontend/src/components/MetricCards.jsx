@@ -1,14 +1,9 @@
 import React from 'react'
 import { motion } from 'framer-motion'
 
-function MetricCard({ title, value, subtitle, color, isLarge = false, index = 0 }) {
+function MetricCard({ title, value, subtitle, color, stale = 0, index = 0 }) {
   const formatNumber = (num) => {
     if (typeof num === 'number') {
-      if (num >= 1000000) {
-        return `$${(num / 1000000).toFixed(1)}M`
-      } else if (num >= 1000) {
-        return num >= 10000 ? `$${(num / 1000).toFixed(0)}K` : num.toLocaleString()
-      }
       return num.toLocaleString()
     }
     return num
@@ -22,6 +17,12 @@ function MetricCard({ title, value, subtitle, color, isLarge = false, index = 0 
       case 'blue': return 'from-blue-500 to-sky-400'
       case 'purple': return 'from-purple-500 to-violet-400'
       case 'cyan': return 'from-cyan-500 to-teal-400'
+      case 'orange': return 'from-orange-500 to-amber-400'
+      case 'yellow': return 'from-yellow-500 to-amber-300'
+      case 'pink': return 'from-pink-500 to-rose-400'
+      case 'indigo': return 'from-indigo-500 to-blue-400'
+      case 'emerald': return 'from-emerald-500 to-green-400'
+      case 'slate': return 'from-slate-400 to-gray-300'
       default: return 'from-teal-500 to-cyan-400'
     }
   }
@@ -34,6 +35,12 @@ function MetricCard({ title, value, subtitle, color, isLarge = false, index = 0 
       case 'blue': return 'rgba(59, 130, 246, 0.5)'
       case 'purple': return 'rgba(168, 85, 247, 0.5)'
       case 'cyan': return 'rgba(6, 182, 212, 0.5)'
+      case 'orange': return 'rgba(249, 115, 22, 0.5)'
+      case 'yellow': return 'rgba(234, 179, 8, 0.5)'
+      case 'pink': return 'rgba(236, 72, 153, 0.5)'
+      case 'indigo': return 'rgba(99, 102, 241, 0.5)'
+      case 'emerald': return 'rgba(16, 185, 129, 0.5)'
+      case 'slate': return 'rgba(148, 163, 184, 0.5)'
       default: return 'rgba(20, 184, 166, 0.5)'
     }
   }
@@ -44,7 +51,7 @@ function MetricCard({ title, value, subtitle, color, isLarge = false, index = 0 
       whileInView={{ opacity: 1, y: 0, scale: 1 }}
       viewport={{ once: true, margin: "-50px" }}
       transition={{
-        delay: index * 0.1,
+        delay: index * 0.05,
         duration: 0.6,
         ease: [0.22, 1, 0.36, 1]
       }}
@@ -55,7 +62,6 @@ function MetricCard({ title, value, subtitle, color, isLarge = false, index = 0 
       }}
       className="metric-card group cursor-default"
     >
-      {/* Glow orb effect */}
       <motion.div
         className="absolute -top-16 -right-16 w-40 h-40 rounded-full blur-3xl"
         style={{ background: getGlowColor() }}
@@ -64,10 +70,9 @@ function MetricCard({ title, value, subtitle, color, isLarge = false, index = 0 
         transition={{ duration: 0.4 }}
       />
 
-      {/* Header with indicator */}
-      <div className="flex items-center gap-3 mb-4 relative z-10">
+      <div className="flex items-center gap-2 mb-3 relative z-10">
         <motion.div
-          className={`w-3 h-3 rounded-full bg-gradient-to-r ${getGradient()}`}
+          className={`w-2.5 h-2.5 rounded-full bg-gradient-to-r ${getGradient()}`}
           style={{ boxShadow: `0 0 15px ${getGlowColor()}` }}
           animate={{
             scale: [1, 1.2, 1],
@@ -79,14 +84,13 @@ function MetricCard({ title, value, subtitle, color, isLarge = false, index = 0 
             ease: "easeInOut"
           }}
         />
-        <span className="text-[10px] font-bold tracking-[0.2em] uppercase text-white/35 font-display">
+        <span className="text-[9px] font-bold tracking-[0.15em] uppercase text-white/35 font-display leading-tight">
           {title}
         </span>
       </div>
 
-      {/* Value - Bold Typography with Manrope */}
       <motion.p
-        className={`font-extrabold text-white mb-2 relative z-10 font-display ${isLarge ? 'text-5xl' : 'text-4xl'}`}
+        className="font-extrabold text-white mb-1 relative z-10 font-display text-3xl"
         style={{
           letterSpacing: '-0.04em',
           textShadow: `0 0 50px ${getGlowColor()}`
@@ -94,96 +98,69 @@ function MetricCard({ title, value, subtitle, color, isLarge = false, index = 0 
         initial={{ opacity: 0, x: -10 }}
         whileInView={{ opacity: 1, x: 0 }}
         viewport={{ once: true }}
-        transition={{ delay: index * 0.1 + 0.3, duration: 0.5 }}
+        transition={{ delay: index * 0.05 + 0.3, duration: 0.5 }}
       >
         {formatNumber(value)}
       </motion.p>
 
-      {/* Subtitle */}
       {subtitle && (
-        <p className="text-sm text-white/45 font-medium relative z-10">
+        <p className="text-xs text-white/45 font-medium relative z-10">
           {subtitle}
+        </p>
+      )}
+
+      {stale > 0 && (
+        <p className="text-[10px] text-amber-400/70 font-semibold relative z-10 mt-1.5">
+          ⏳ {stale} con +7 dias
         </p>
       )}
     </motion.div>
   )
 }
 
-function MetricCards({ metrics }) {
-  if (!metrics) return null
+const STAGE_CARDS_CONFIG = [
+  { key: 'e0_noInteresado', title: 'E0. No Interesado', color: 'slate', subtitle: 'Descartados' },
+  { key: 'e1_nuevoLead', title: 'E1. Nuevo Lead', color: 'teal', subtitle: 'Leads nuevos' },
+  { key: 'e2_interes', title: 'E2. Interes en VV', color: 'blue', subtitle: 'Pendiente envio fotos' },
+  { key: 'e3_seguimiento', title: 'E3. Seguimiento Fotos', color: 'cyan', subtitle: 'Fotos no enviadas' },
+  { key: 'e4_fotosRecibidas', title: 'E4. Fotos Recibidas', color: 'indigo', subtitle: 'Pendiente VV' },
+  { key: 'e5_valoracionVirtual', title: 'E5. Valoracion Virtual', color: 'purple', subtitle: 'Agendada' },
+  { key: 'vvReagendada', title: 'VV Re Agendada', color: 'orange', subtitle: 'Reagendadas' },
+  { key: 'e6_noContesto', title: 'E6. No Contesto', color: 'red', subtitle: 'Sin respuesta' },
+  { key: 'e7_valoracionRealizada', title: 'E7. Valoracion Realizada', color: 'pink', subtitle: 'Cotizacion enviada' },
+  { key: 'e8_seguimientoCierre', title: 'E8. Seguimiento Cierre', color: 'yellow', subtitle: 'En proceso de cierre' },
+  { key: 'e9_deposito', title: 'E9. Deposito Realizado', color: 'emerald', subtitle: 'Sin fecha de cirugia' },
+  { key: 'e10_fechaCirugia', title: 'E10. Fecha Cirugia', color: 'green', subtitle: 'Fecha seleccionada' }
+]
 
-  const mainCards = [
-    {
-      title: 'Total Leads',
-      value: metrics.totalLeads,
-      color: 'teal',
-      subtitle: 'Leads del periodo',
-      isLarge: true
-    },
-    {
-      title: 'Leads Calificados',
-      value: metrics.leadsCalificados,
-      color: 'blue',
-      subtitle: `${metrics.tasaContacto}% contactados`,
-      isLarge: true
-    },
-    {
-      title: 'Valoraciones',
-      value: metrics.valoradasCotizacion,
-      color: 'purple',
-      subtitle: 'Con cotización',
-      isLarge: true
-    },
-    {
-      title: 'Tasa Conversión',
-      value: `${metrics.tasaConversion}%`,
-      color: 'green',
-      subtitle: 'Lead a cierre',
-      isLarge: true
-    }
-  ]
-
-  const secondaryCards = [
-    {
-      title: 'Agendadas',
-      value: metrics.agendadasValoracion,
-      color: 'cyan',
-      subtitle: 'Citas programadas'
-    },
-    {
-      title: 'No Contactadas',
-      value: metrics.noContactoValoracion,
-      color: 'red',
-      subtitle: 'Pendientes'
-    },
-    {
-      title: 'Oport. Cierre',
-      value: metrics.oportunidadesCierreTotal,
-      color: 'teal',
-      subtitle: `${metrics.oportunidadesCierreAlta} alta / ${metrics.oportunidadesCierreMedia} media`
-    },
-    {
-      title: 'Depósitos',
-      value: metrics.depositosRealizados,
-      color: 'green',
-      subtitle: `$${metrics.totalDepositos?.toLocaleString() || 0}`
-    }
-  ]
+function MetricCards({ currentStages }) {
+  if (!currentStages) return null
 
   return (
-    <div className="space-y-4 sm:space-y-6">
-      {/* Main metrics - Hero cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4 lg:gap-5">
-        {mainCards.map((card, index) => (
-          <MetricCard key={index} {...card} index={index} />
-        ))}
+    <div>
+      <div className="flex items-center gap-3 mb-4">
+        <span className="badge badge-teal">En vivo</span>
+        <p className="text-sm text-white/40 font-medium">
+          Estado actual del pipeline — {currentStages.total?.toLocaleString()} oportunidades totales
+        </p>
       </div>
-
-      {/* Secondary metrics */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">
-        {secondaryCards.map((card, index) => (
-          <MetricCard key={index} {...card} index={index + 4} />
-        ))}
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3 sm:gap-4">
+        {STAGE_CARDS_CONFIG.map((card, index) => {
+          const stageData = currentStages.porEtapa?.[card.key]
+          const count = typeof stageData === 'object' ? stageData.count : (stageData || 0)
+          const stale = typeof stageData === 'object' ? stageData.stale : 0
+          return (
+            <MetricCard
+              key={card.key}
+              title={card.title}
+              value={count}
+              stale={stale}
+              color={card.color}
+              subtitle={card.subtitle}
+              index={index}
+            />
+          )
+        })}
       </div>
     </div>
   )

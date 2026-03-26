@@ -2,40 +2,41 @@ const axios = require('axios');
 const { createClient } = require('@supabase/supabase-js');
 
 // ============================================
-// CONFIGURACIÓN
+// CONFIGURACIÓN - API v2 (Integraciones Privadas)
 // ============================================
-const GHL_API_BASE = 'https://rest.gohighlevel.com/v1';
+const GHL_API_BASE = 'https://services.leadconnectorhq.com';
+const GHL_API_VERSION = '2021-07-28';
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_ANON_KEY
 );
 
-const SNAPSHOT_TTL_MS = 5 * 60 * 1000; // 5 minutos
+const SNAPSHOT_TTL_MS = 5 * 60 * 1000;
 
 // ============================================
-// GHL SERVICE (inline para serverless)
+// GHL SERVICE (API v2)
 // ============================================
 const ghlClient = axios.create({
   baseURL: GHL_API_BASE,
   headers: {
     'Authorization': `Bearer ${process.env.GHL_API_KEY}`,
-    'Content-Type': 'application/json'
+    'Content-Type': 'application/json',
+    'Version': GHL_API_VERSION
   }
 });
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
-async function makeRequest(method, url, options = {}, retryCount = 0) {
+async function makeRequest(method, url, dataOrOptions = {}, retryCount = 0) {
   try {
     await sleep(500);
-    const response = await ghlClient[method](url, options);
+    const response = await ghlClient[method](url, dataOrOptions);
     return response;
   } catch (error) {
     if (error.response?.status === 429 && retryCount < 3) {
-      const waitTime = 2000 * Math.pow(2, retryCount);
-      await sleep(waitTime);
-      return makeRequest(method, url, options, retryCount + 1);
+      await sleep(2000 * Math.pow(2, retryCount));
+      return makeRequest(method, url, dataOrOptions, retryCount + 1);
     }
     throw error;
   }
@@ -44,24 +45,23 @@ async function makeRequest(method, url, options = {}, retryCount = 0) {
 async function fetchAllOpportunities() {
   let allOpportunities = [];
   let hasMore = true;
-  let startAfterId = null;
-  let startAfter = null;
+  let page = 1;
 
   while (hasMore) {
-    const params = { limit: 100 };
-    if (startAfterId) {
-      params.startAfterId = startAfterId;
-      params.startAfter = startAfter;
-    }
+    const params = new URLSearchParams({
+      location_id: process.env.GHL_LOCATION_ID,
+      pipeline_id: process.env.GHL_PIPELINE_ID,
+      limit: 100,
+      page: page
+    });
 
-    const response = await makeRequest('get', `/pipelines/${process.env.GHL_PIPELINE_ID}/opportunities`, { params });
+    const response = await makeRequest('get', `/opportunities/search?${params.toString()}`);
     const opportunities = response.data.opportunities || [];
     allOpportunities = [...allOpportunities, ...opportunities];
 
     const meta = response.data.meta;
-    if (meta && meta.nextPage && opportunities.length === 100) {
-      startAfterId = meta.startAfterId;
-      startAfter = meta.startAfter;
+    if (meta && meta.total > allOpportunities.length && opportunities.length === 100) {
+      page++;
     } else {
       hasMore = false;
     }
@@ -70,8 +70,73 @@ async function fetchAllOpportunities() {
   return allOpportunities;
 }
 
+async function getRecentConversations(limit = 30) {
+  try {
+    const params = new URLSearchParams({
+      locationId: process.env.GHL_LOCATION_ID,
+      limit: limit,
+      sortBy: 'last_message_date',
+      sortOrder: 'desc'
+    });
+    const response = await makeRequest('get', `/conversations/search?${params.toString()}`);
+    return response.data.conversations || [];
+  } catch (error) {
+    return [];
+  }
+}
+
+async function getConversationMessages(conversationId, limit = 20) {
+  try {
+    const response = await makeRequest('get', `/conversations/${conversationId}/messages?limit=${limit}`);
+    return response.data.messages?.messages || [];
+  } catch (error) {
+    return [];
+  }
+}
+
+async function calculateResponseTime(sampleSize = 30) {
+  try {
+    const conversations = await getRecentConversations(sampleSize);
+    const responseTimes = [];
+
+    for (const conv of conversations) {
+      const messages = await getConversationMessages(conv.id, 20);
+      if (!messages || messages.length < 2) continue;
+
+      const sorted = [...messages].sort((a, b) => new Date(a.dateAdded) - new Date(b.dateAdded));
+
+      for (let i = 0; i < sorted.length - 1; i++) {
+        if (sorted[i].direction === 'inbound') {
+          for (let j = i + 1; j < sorted.length; j++) {
+            if (sorted[j].direction === 'outbound') {
+              const diffMinutes = (new Date(sorted[j].dateAdded) - new Date(sorted[i].dateAdded)) / (1000 * 60);
+              if (diffMinutes > 0 && diffMinutes < 1440) {
+                responseTimes.push(diffMinutes);
+              }
+              break;
+            }
+          }
+        }
+      }
+    }
+
+    return {
+      avgMinutes: responseTimes.length > 0
+        ? Math.round(responseTimes.reduce((a, b) => a + b, 0) / responseTimes.length)
+        : 0,
+      medianMinutes: responseTimes.length > 0
+        ? Math.round(responseTimes.sort((a, b) => a - b)[Math.floor(responseTimes.length / 2)])
+        : 0,
+      samplesAnalyzed: responseTimes.length,
+      conversationsChecked: conversations.length
+    };
+  } catch (error) {
+    return { avgMinutes: 0, medianMinutes: 0, samplesAnalyzed: 0, conversationsChecked: 0 };
+  }
+}
+
 // ============================================
-// SUPABASE DB FUNCTIONS
+// SUPABASE
 // ============================================
 
 function mapOppToDB(opp) {
@@ -79,9 +144,7 @@ function mapOppToDB(opp) {
     id: opp.id,
     pipeline_stage_id: opp.pipelineStageId,
     contact_id: opp.contact?.id || null,
-    contact_name: opp.contact?.name || opp.contact?.firstName
-      ? `${opp.contact?.firstName || ''} ${opp.contact?.lastName || ''}`.trim()
-      : null,
+    contact_name: opp.contact?.name || null,
     contact_email: opp.contact?.email || null,
     contact_phone: opp.contact?.phone || null,
     contact_tags: opp.contact?.tags || [],
@@ -95,26 +158,6 @@ function mapOppToDB(opp) {
   };
 }
 
-function mapOppFromDB(row) {
-  return {
-    id: row.id,
-    pipelineStageId: row.pipeline_stage_id,
-    createdAt: row.created_at,
-    dateAdded: row.created_at,
-    updatedAt: row.updated_at,
-    monetaryValue: row.monetary_value,
-    source: row.source,
-    status: row.status,
-    contact: {
-      id: row.contact_id,
-      name: row.contact_name,
-      email: row.contact_email,
-      phone: row.contact_phone,
-      tags: row.contact_tags || []
-    }
-  };
-}
-
 async function upsertOpportunities(opportunities) {
   const BATCH_SIZE = 100;
   let newCount = 0;
@@ -123,68 +166,20 @@ async function upsertOpportunities(opportunities) {
   for (let i = 0; i < opportunities.length; i += BATCH_SIZE) {
     const batch = opportunities.slice(i, i + BATCH_SIZE);
     const rows = batch.map(mapOppToDB);
-
     const ids = rows.map(r => r.id);
-    const { data: existing } = await supabase
-      .from('opportunities')
-      .select('id')
-      .in('id', ids);
-
+    const { data: existing } = await supabase.from('opportunities').select('id').in('id', ids);
     const existingIds = new Set((existing || []).map(e => e.id));
     newCount += rows.filter(r => !existingIds.has(r.id)).length;
     updatedCount += rows.length - rows.filter(r => !existingIds.has(r.id)).length;
-
-    const { error } = await supabase
-      .from('opportunities')
-      .upsert(rows, { onConflict: 'id' });
-
+    const { error } = await supabase.from('opportunities').upsert(rows, { onConflict: 'id' });
     if (error) throw error;
   }
 
   return { total: opportunities.length, new: newCount, updated: updatedCount };
 }
 
-async function getOpportunitiesFromDB(startDate, endDate) {
-  // Buffer de 1 día para compensar timezone (UTC vs local)
-  const start = new Date(startDate);
-  start.setDate(start.getDate() - 1);
-  const end = new Date(endDate);
-  end.setDate(end.getDate() + 1);
-  const startISO = start.toISOString().split('T')[0] + 'T00:00:00';
-  const endISO = end.toISOString().split('T')[0] + 'T23:59:59';
-
-  let allRows = [];
-  let from = 0;
-  const PAGE_SIZE = 1000;
-
-  while (true) {
-    const { data, error } = await supabase
-      .from('opportunities')
-      .select('*')
-      .gte('created_at', startISO)
-      .lte('created_at', endISO)
-      .range(from, from + PAGE_SIZE - 1);
-
-    if (error) throw error;
-    allRows = allRows.concat(data || []);
-    if (!data || data.length < PAGE_SIZE) break;
-    from += PAGE_SIZE;
-  }
-
-  return allRows.map(mapOppFromDB);
-}
-
-async function getOpportunityCount() {
-  const { count, error } = await supabase
-    .from('opportunities')
-    .select('*', { count: 'exact', head: true });
-  if (error) return 0;
-  return count || 0;
-}
-
 async function getLatestSnapshot(startDate, endDate) {
   const cutoff = new Date(Date.now() - SNAPSHOT_TTL_MS).toISOString();
-
   const { data, error } = await supabase
     .from('metrics_snapshots')
     .select('*')
@@ -196,39 +191,23 @@ async function getLatestSnapshot(startDate, endDate) {
     .single();
 
   if (error || !data) return null;
-  return {
-    funnel: data.funnel,
-    stages: data.stages,
-    times: data.times,
-    sources: data.sources,
-    trend: data.trend
-  };
+  return { funnel: data.funnel, stages: data.stages, times: data.times, sources: data.sources, trend: data.trend };
 }
 
 async function insertSnapshot(startDate, endDate, syncType, metricsData, oppCount) {
-  await supabase
-    .from('metrics_snapshots')
-    .insert({
-      start_date: startDate,
-      end_date: endDate,
-      sync_type: syncType,
-      funnel: metricsData.funnel,
-      stages: metricsData.stages,
-      times: metricsData.times,
-      sources: metricsData.sources,
-      trend: metricsData.trend,
-      opportunity_count: oppCount
-    });
-}
-
-async function insertSyncLog(entry) {
-  await supabase.from('sync_log').insert(entry).catch(() => {});
+  await supabase.from('metrics_snapshots').insert({
+    start_date: startDate, end_date: endDate, sync_type: syncType,
+    funnel: metricsData.funnel, stages: metricsData.stages,
+    times: metricsData.times, sources: metricsData.sources,
+    trend: metricsData.trend, opportunity_count: oppCount
+  }).catch(() => {});
 }
 
 // ============================================
-// METRICS SERVICE (inline para serverless)
+// METRICS SERVICE
 // ============================================
 const stageIds = {
+  noInteresado: '31db8524-1bd5-412d-974f-df98831b1212',
   nuevoLead: 'a99b16a6-01b6-4570-b4c6-6bacc2fbf072',
   interesPendiente: '2d74b32b-c5d7-4e8a-9049-78d9ea7231c9',
   seguimientoFotos: '6e4785c2-cd9a-4bf5-860c-bb27129678c7',
@@ -243,6 +222,7 @@ const stageIds = {
 };
 
 const stageNames = {
+  '31db8524-1bd5-412d-974f-df98831b1212': 'E0. NO INTERESADO',
   'a99b16a6-01b6-4570-b4c6-6bacc2fbf072': 'E1. NUEVO LEAD',
   '2d74b32b-c5d7-4e8a-9049-78d9ea7231c9': 'E2. INTERES EN VV',
   '6e4785c2-cd9a-4bf5-860c-bb27129678c7': 'E3. SEGUIMIENTO FOTOS',
@@ -257,6 +237,7 @@ const stageNames = {
 };
 
 const stageOrder = [
+  '31db8524-1bd5-412d-974f-df98831b1212',
   'a99b16a6-01b6-4570-b4c6-6bacc2fbf072',
   '2d74b32b-c5d7-4e8a-9049-78d9ea7231c9',
   '6e4785c2-cd9a-4bf5-860c-bb27129678c7',
@@ -277,8 +258,8 @@ function filterByDateRange(opportunities, startDate, endDate) {
   const end = new Date(eY, eM - 1, eD, 23, 59, 59, 999);
 
   return opportunities.filter(opp => {
-    const createdAt = new Date(opp.createdAt || opp.dateAdded);
-    return createdAt >= start && createdAt <= end;
+    const stageDate = new Date(opp.lastStageChangeAt || opp.lastStatusChangeAt || opp.createdAt || opp.dateAdded);
+    return stageDate >= start && stageDate <= end;
   });
 }
 
@@ -290,7 +271,7 @@ function buildFunnelMetrics(opportunities) {
   });
 
   const totalLeads = opportunities.length;
-  const leadsCalificados = opportunities.filter(o => o.pipelineStageId !== stageIds.nuevoLead).length;
+  const leadsCalificados = opportunities.filter(o => o.pipelineStageId !== stageIds.nuevoLead && o.pipelineStageId !== stageIds.noInteresado).length;
 
   const stagesAgendadas = [stageIds.valoracionVirtual, stageIds.vvReagendada, stageIds.vvNoContesto, stageIds.valoracionRealizada, stageIds.seguimientoCierre, stageIds.depositoRealizado, stageIds.fechaCirugia];
   const agendadasValoracion = opportunities.filter(o => stagesAgendadas.includes(o.pipelineStageId)).length;
@@ -324,6 +305,7 @@ function buildFunnelMetrics(opportunities) {
     tasaConversion: totalLeads > 0 ? ((depositosRealizados.length / totalLeads) * 100).toFixed(2) : 0,
     tasaContacto: totalLeads > 0 ? ((leadsCalificados / totalLeads) * 100).toFixed(2) : 0,
     porEtapa: {
+      e0_noInteresado: countByStage[stageIds.noInteresado] || 0,
       e1_nuevoLead: countByStage[stageIds.nuevoLead] || 0,
       e2_interes: countByStage[stageIds.interesPendiente] || 0,
       e3_seguimiento: countByStage[stageIds.seguimientoFotos] || 0,
@@ -369,46 +351,30 @@ function buildAverageTimes(opportunities) {
 
 function getChannel(source, tagsJoined) {
   const s = (source || '').toLowerCase();
-
-  // 1. Ads de Meta (Facebook/Instagram) — prioridad alta
   if (tagsJoined.includes('fb-ad-lead') || tagsJoined.includes('fb-ad')) return 'Facebook Ads';
   if (tagsJoined.includes('instagram-ad-lead') || tagsJoined.includes('instagram-ad')) return 'Instagram Ads';
-
-  // 2. Source explícito
   if (s.includes('facebook') || s.includes('fb')) return 'Facebook Ads';
   if (s.includes('instagram')) return 'Instagram Ads';
   if (s.includes('google')) return 'Google';
   if (s.includes('tiktok') || tagsJoined.includes('tiktok')) return 'TikTok';
-
-  // 3. WhatsApp orgánico/directo (sin tag de ad)
-  if (s.includes('whatsapp') || tagsJoined.includes('inbound whatsapp') ||
-      tagsJoined.includes('wa:') || tagsJoined.includes('wazz') ||
-      tagsJoined.includes('whatsapp')) return 'WhatsApp';
-
-  // 4. Email/Correo
+  if (s.includes('whatsapp') || tagsJoined.includes('inbound whatsapp') || tagsJoined.includes('wa:') || tagsJoined.includes('wazz') || tagsJoined.includes('whatsapp')) return 'WhatsApp';
   if (s.includes('email') || s.includes('correo') || tagsJoined.includes('correo')) return 'Correo';
-
-  // 5. Source con valor pero no reconocido
   if (source) return 'Otros';
-
-  // 6. Sin source ni tags reconocibles
   return 'Sin fuente';
 }
 
 function buildSourceMetrics(opportunities) {
   const channelMetrics = {};
-
   opportunities.forEach(opp => {
     const rawSource = opp.source || null;
-    const rawTags = opp.contact?.tags || [];
-    const tagsJoined = rawTags.join(' ').toLowerCase();
+    const tagsJoined = (opp.contact?.tags || []).join(' ').toLowerCase();
     const channel = getChannel(rawSource, tagsJoined);
     const campaignName = rawSource || 'Sin campaña';
 
     if (!channelMetrics[channel]) channelMetrics[channel] = { total: 0, calificados: 0, valoraciones: 0, depositos: 0, valorTotal: 0, _campaigns: {} };
     channelMetrics[channel].total++;
     const stageId = opp.pipelineStageId;
-    if (stageId !== stageIds.nuevoLead) channelMetrics[channel].calificados++;
+    if (stageId !== stageIds.nuevoLead && stageId !== stageIds.noInteresado) channelMetrics[channel].calificados++;
     const sv = [stageIds.valoracionRealizada, stageIds.seguimientoCierre, stageIds.depositoRealizado, stageIds.fechaCirugia];
     if (sv.includes(stageId)) channelMetrics[channel].valoraciones++;
     const sd = [stageIds.depositoRealizado, stageIds.fechaCirugia];
@@ -417,7 +383,7 @@ function buildSourceMetrics(opportunities) {
 
     if (!channelMetrics[channel]._campaigns[campaignName]) channelMetrics[channel]._campaigns[campaignName] = { total: 0, calificados: 0, depositos: 0, valorTotal: 0 };
     channelMetrics[channel]._campaigns[campaignName].total++;
-    if (stageId !== stageIds.nuevoLead) channelMetrics[channel]._campaigns[campaignName].calificados++;
+    if (stageId !== stageIds.nuevoLead && stageId !== stageIds.noInteresado) channelMetrics[channel]._campaigns[campaignName].calificados++;
     if (isDeposito) { channelMetrics[channel]._campaigns[campaignName].depositos++; channelMetrics[channel]._campaigns[campaignName].valorTotal += parseFloat(opp.monetaryValue) || 0; }
   });
   return Object.entries(channelMetrics).map(([source, m]) => ({
@@ -434,7 +400,7 @@ function buildDailyTrend(opportunities) {
   const sv = [stageIds.valoracionRealizada, stageIds.seguimientoCierre, stageIds.depositoRealizado, stageIds.fechaCirugia];
   const sd = [stageIds.depositoRealizado, stageIds.fechaCirugia];
   opportunities.forEach(opp => {
-    const d = new Date(opp.createdAt);
+    const d = new Date(opp.lastStageChangeAt || opp.lastStatusChangeAt || opp.createdAt);
     const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
     if (!dailyData[key]) dailyData[key] = { leads: 0, valoraciones: 0, depositos: 0 };
     dailyData[key].leads++;
@@ -451,6 +417,43 @@ function calculateAllMetrics(opportunities) {
     times: buildAverageTimes(opportunities),
     sources: buildSourceMetrics(opportunities),
     trend: buildDailyTrend(opportunities)
+  };
+}
+
+function buildCurrentSnapshot(allOpportunities) {
+  const now = Date.now();
+  const oneWeekMs = 7 * 24 * 60 * 60 * 1000;
+  const countByStage = {};
+  const staleByStage = {};
+  stageOrder.forEach(id => { countByStage[id] = 0; staleByStage[id] = 0; });
+
+  allOpportunities.forEach(opp => {
+    const stageId = opp.pipelineStageId;
+    if (countByStage[stageId] !== undefined) {
+      countByStage[stageId]++;
+      const stageDate = new Date(opp.lastStageChangeAt || opp.lastStatusChangeAt || opp.createdAt);
+      if (now - stageDate.getTime() > oneWeekMs) staleByStage[stageId]++;
+    }
+  });
+
+  const build = (id) => ({ count: countByStage[id] || 0, stale: staleByStage[id] || 0 });
+
+  return {
+    total: allOpportunities.length,
+    porEtapa: {
+      e0_noInteresado: build(stageIds.noInteresado),
+      e1_nuevoLead: build(stageIds.nuevoLead),
+      e2_interes: build(stageIds.interesPendiente),
+      e3_seguimiento: build(stageIds.seguimientoFotos),
+      e4_fotosRecibidas: build(stageIds.fotosRecibidas),
+      e5_valoracionVirtual: build(stageIds.valoracionVirtual),
+      vvReagendada: build(stageIds.vvReagendada),
+      e6_noContesto: build(stageIds.vvNoContesto),
+      e7_valoracionRealizada: build(stageIds.valoracionRealizada),
+      e8_seguimientoCierre: build(stageIds.seguimientoCierre),
+      e9_deposito: build(stageIds.depositoRealizado),
+      e10_fechaCirugia: build(stageIds.fechaCirugia)
+    }
   };
 }
 
@@ -480,109 +483,51 @@ exports.handler = async (event) => {
     const path = event.path.replace('/.netlify/functions/metrics', '').replace('/api/metrics', '').replace(/^\//, '');
     const params = event.queryStringParameters || {};
 
-    const startDate = params.startDate;
-    const endDate = params.endDate;
-    const dateRange = startDate && endDate
-      ? { startDate, endDate }
+    const dateRange = params.startDate && params.endDate
+      ? { startDate: params.startDate, endDate: params.endDate }
       : getCurrentMonthRange();
 
-    // /summary — endpoint principal del dashboard
+    // /current-stages — snapshot actual sin filtro de fecha
+    if (path === 'current-stages') {
+      const allOpportunities = await fetchAllOpportunities();
+      const data = buildCurrentSnapshot(allOpportunities);
+      return { statusCode: 200, headers, body: JSON.stringify({ success: true, data }) };
+    }
+
+    // /response-time — tiempo promedio de respuesta
+    if (path === 'response-time') {
+      const data = await calculateResponseTime(30);
+      return { statusCode: 200, headers, body: JSON.stringify({ success: true, data }) };
+    }
+
+    // /summary — endpoint principal
     if (path === 'summary' || path === '' || !path) {
-      const forceRefresh = params.force === 'true';
+      // Descargar todas las oportunidades de GHL
+      const allOpportunities = await fetchAllOpportunities();
 
-      // === FORCE: Sync completo desde GHL ===
-      if (forceRefresh) {
-        const startTime = Date.now();
+      // Sync a Supabase en background (no bloquea la respuesta)
+      upsertOpportunities(allOpportunities).catch(() => {});
 
-        // 1. Descargar de GHL
-        const allOpportunities = await fetchAllOpportunities();
+      // Filtrar por periodo y calcular métricas
+      const filtered = filterByDateRange(allOpportunities, dateRange.startDate, dateRange.endDate);
+      const data = calculateAllMetrics(filtered);
 
-        // 2. Upsert en Supabase
-        const upsertResult = await upsertOpportunities(allOpportunities);
-
-        // 3. Calcular métricas para el rango solicitado
-        const filtered = filterByDateRange(allOpportunities, dateRange.startDate, dateRange.endDate);
-        const data = calculateAllMetrics(filtered);
-
-        // 4. Guardar snapshot
-        await insertSnapshot(dateRange.startDate, dateRange.endDate, 'manual', data, filtered.length);
-
-        // 5. Log
-        const duration = Date.now() - startTime;
-        insertSyncLog({
-          sync_type: 'manual',
-          status: 'success',
-          opportunities_total: allOpportunities.length,
-          opportunities_new: upsertResult.new,
-          opportunities_updated: upsertResult.updated,
-          duration_ms: duration
-        });
-
-        return {
-          statusCode: 200, headers,
-          body: JSON.stringify({
-            success: true, dateRange, source: 'sync',
-            syncInfo: { total: upsertResult.total, new: upsertResult.new, updated: upsertResult.updated, duration },
-            data
-          })
-        };
-      }
-
-      // === NORMAL: Intentar snapshot reciente ===
-      const snapshot = await getLatestSnapshot(dateRange.startDate, dateRange.endDate);
-      if (snapshot) {
-        return {
-          statusCode: 200, headers,
-          body: JSON.stringify({ success: true, dateRange, source: 'snapshot', data: snapshot })
-        };
-      }
-
-      // === Sin snapshot: Leer de tabla opportunities ===
-      const dbCount = await getOpportunityCount();
-
-      if (dbCount === 0) {
-        // Primera vez — descargar de GHL y poblar DB
-        const allOpportunities = await fetchAllOpportunities();
-        await upsertOpportunities(allOpportunities);
-
-        const filtered = filterByDateRange(allOpportunities, dateRange.startDate, dateRange.endDate);
-        const data = calculateAllMetrics(filtered);
-        await insertSnapshot(dateRange.startDate, dateRange.endDate, 'bootstrap', data, filtered.length);
-
-        return {
-          statusCode: 200, headers,
-          body: JSON.stringify({ success: true, dateRange, source: 'bootstrap', data })
-        };
-      }
-
-      // Leer de DB y filtrar con timezone local
-      const rawOpps = await getOpportunitiesFromDB(dateRange.startDate, dateRange.endDate);
-      const opportunities = filterByDateRange(rawOpps, dateRange.startDate, dateRange.endDate);
-      const data = calculateAllMetrics(opportunities);
-      insertSnapshot(dateRange.startDate, dateRange.endDate, 'query', data, opportunities.length).catch(() => {});
+      // Guardar snapshot en background
+      insertSnapshot(dateRange.startDate, dateRange.endDate, 'query', data, filtered.length);
 
       return {
         statusCode: 200, headers,
-        body: JSON.stringify({ success: true, dateRange, source: 'database', data })
+        body: JSON.stringify({ success: true, dateRange, source: 'ghl', data })
       };
     }
 
     // /sync-info
     if (path === 'sync-info') {
-      const { data, error } = await supabase
-        .from('sync_log')
-        .select('*')
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .single();
-
-      return {
-        statusCode: 200, headers,
-        body: JSON.stringify({ success: true, data: error ? null : data })
-      };
+      const { data } = await supabase.from('sync_log').select('*').order('created_at', { ascending: false }).limit(1).single();
+      return { statusCode: 200, headers, body: JSON.stringify({ success: true, data }) };
     }
 
-    // Endpoints individuales (fallback directo a GHL)
+    // Endpoints individuales
     const allOpportunities = await fetchAllOpportunities();
     const opportunities = filterByDateRange(allOpportunities, dateRange.startDate, dateRange.endDate);
 
@@ -597,14 +542,8 @@ exports.handler = async (event) => {
         return { statusCode: 404, headers, body: JSON.stringify({ error: 'Endpoint no encontrado' }) };
     }
 
-    return {
-      statusCode: 200, headers,
-      body: JSON.stringify({ success: true, dateRange, data })
-    };
+    return { statusCode: 200, headers, body: JSON.stringify({ success: true, dateRange, data }) };
   } catch (error) {
-    return {
-      statusCode: 500, headers,
-      body: JSON.stringify({ success: false, error: error.message })
-    };
+    return { statusCode: 500, headers, body: JSON.stringify({ success: false, error: error.message }) };
   }
 };

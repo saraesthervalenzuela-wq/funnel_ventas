@@ -169,45 +169,11 @@ function getActionValue(actions, types) {
 }
 
 // --- System prompt ---
-const SYSTEM_PROMPT = `Eres un analista de ventas experto para Ciplastic, una clínica de cirugía plástica en México.
-Tu trabajo es analizar las métricas del funnel de ventas y proporcionar un diagnóstico claro y accionable.
+const SYSTEM_PROMPT = `Analista de ventas para Ciplastic (clínica de cirugía plástica, México). Pipeline: 10 etapas, E1=Nuevo Lead, E9=Depósito, E10=Fecha Cirugía. Calificados=avanzaron de E1. Cierres=E9+E10. Tasa contacto sana:>60%, conversión sana:>5%, cierre sano:<30 días, CPL preocupante:>$15 USD.
 
-CONTEXTO DEL NEGOCIO:
-- Ciplastic es una clínica de cirugía plástica que capta leads por Meta Ads (Facebook/Instagram), WhatsApp, Google, etc.
-- El pipeline tiene 10 etapas: desde Nuevo Lead hasta Fecha de Cirugía Seleccionada
-- "Calificados" = leads que avanzaron más allá de E1 (Nuevo Lead)
-- "Cierres" = leads que llegaron a E9 (Depósito Realizado) o E10 (Fecha de Cirugía)
-- Las valoraciones virtuales (VV) son el paso clave donde se evalúa al paciente y se envía cotización
+Responde SOLO JSON válido, SIN markdown. Sé breve y directo. Máximo 3 alertas, 2 insights, 2 recomendaciones.
 
-INSTRUCCIONES:
-- Analiza los datos proporcionados para detectar focos rojos, cuellos de botella, y oportunidades
-- Sé específico con números y porcentajes
-- Da recomendaciones prácticas y accionables
-- Responde en español
-- Responde ÚNICAMENTE con JSON válido (sin markdown, sin backticks, sin texto adicional)
-
-ESTRUCTURA DE RESPUESTA (JSON):
-{
-  "resumenEjecutivo": "2-3 oraciones del estado general del funnel",
-  "puntuacionSalud": <número 0-100>,
-  "alertas": [
-    { "tipo": "critico|advertencia|info", "titulo": "Título corto", "detalle": "Explicación detallada", "metrica": "Valor relevante", "recomendacion": "Qué hacer" }
-  ],
-  "insights": [
-    { "categoria": "funnel|fuentes|campanas|tiempos|tendencia", "titulo": "Título", "detalle": "Análisis detallado" }
-  ],
-  "recomendaciones": [
-    { "prioridad": "alta|media|baja", "accion": "Qué hacer", "impactoEsperado": "Resultado esperado" }
-  ]
-}
-
-CRITERIOS:
-- Tasa de contacto saludable: >60%
-- Tasa de conversión saludable: >5%
-- Tiempo promedio de cierre saludable: <30 días
-- CPL preocupante: >$15 USD
-- Días sin leads = foco rojo
-- Fuente con muchos leads pero 0 cierres = cuello de botella`;
+{"resumenEjecutivo":"string","puntuacionSalud":number,"alertas":[{"tipo":"critico|advertencia|info","titulo":"string","detalle":"string","metrica":"string","recomendacion":"string"}],"insights":[{"categoria":"funnel|fuentes|campanas|tiempos|tendencia","titulo":"string","detalle":"string"}],"recomendaciones":[{"prioridad":"alta|media|baja","accion":"string","impactoEsperado":"string"}]}`;
 
 function buildDataPrompt(data, metaData, startDate, endDate) {
   let p = `Analiza las siguientes métricas del funnel de ventas de Ciplastic para el periodo ${startDate} al ${endDate}:\n\n`;
@@ -237,7 +203,7 @@ function buildDataPrompt(data, metaData, startDate, endDate) {
     }
     p += '\n';
   }
-  p += `\nProporciona tu análisis completo en formato JSON.`;
+  p += `\nResponde JSON breve.`;
   return p;
 }
 
@@ -271,7 +237,7 @@ exports.handler = async (event) => {
       return { statusCode: 200, headers, body: JSON.stringify({ success: true, dateRange: { startDate, endDate }, cached: true, data: cached }) };
     }
 
-    // Obtener datos
+    // Obtener datos de Supabase (rápido)
     let summaryData;
     const snapshot = await getLatestSnapshot(startDate, endDate);
     if (snapshot) {
@@ -281,28 +247,56 @@ exports.handler = async (event) => {
       const opportunities = filterByDateRange(rawOpps, startDate, endDate);
       summaryData = buildSimpleMetrics(opportunities);
     }
+    const metaData = null; // Skip Meta API para evitar timeout
 
-    const metaData = await getMetaData(startDate, endDate);
-
-    // Llamar a Claude
+    // Llamar a Claude con modelo rápido
     const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
     const dataPrompt = buildDataPrompt(summaryData, metaData, startDate, endDate);
 
     const response = await client.messages.create({
-      model: 'claude-sonnet-4-5-20250929',
-      max_tokens: 4000,
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 1500,
       system: SYSTEM_PROMPT,
-      messages: [{ role: 'user', content: dataPrompt }]
+      messages: [
+        { role: 'user', content: dataPrompt },
+        { role: 'assistant', content: '{' }
+      ]
     });
 
-    const rawText = response.content[0].text;
+    let rawText = '{' + response.content[0].text;
+
+    // Si la respuesta fue truncada (stop_reason: max_tokens), cerrar el JSON
+    if (response.stop_reason === 'max_tokens' || response.stop_reason === 'end_turn') {
+      // Intentar reparar JSON truncado cerrando brackets abiertos
+      let fixed = rawText.replace(/,\s*$/, '');
+      const openBraces = (fixed.match(/\{/g) || []).length;
+      const closeBraces = (fixed.match(/\}/g) || []).length;
+      const openBrackets = (fixed.match(/\[/g) || []).length;
+      const closeBrackets = (fixed.match(/\]/g) || []).length;
+      // Cerrar strings abiertos
+      const quoteCount = (fixed.match(/"/g) || []).length;
+      if (quoteCount % 2 !== 0) fixed += '"';
+      for (let i = 0; i < openBrackets - closeBrackets; i++) fixed += ']';
+      for (let i = 0; i < openBraces - closeBraces; i++) fixed += '}';
+      rawText = fixed;
+    }
+
     let analysis;
     try {
       analysis = JSON.parse(rawText);
     } catch {
-      const jsonMatch = rawText.match(/\{[\s\S]*\}/);
-      if (jsonMatch) { analysis = JSON.parse(jsonMatch[0]); }
-      else { throw new Error('La IA no devolvió JSON válido'); }
+      let cleaned = rawText.replace(/,\s*([}\]])/g, '$1');
+      const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        try { analysis = JSON.parse(jsonMatch[0]); }
+        catch {
+          // Último intento: limpiar agresivamente
+          let last = jsonMatch[0].replace(/,\s*([}\]])/g, '$1').replace(/[\x00-\x1F\x7F]/g, ' ');
+          analysis = JSON.parse(last);
+        }
+      } else {
+        throw new Error('La IA no devolvió JSON válido');
+      }
     }
 
     // Guardar en cache

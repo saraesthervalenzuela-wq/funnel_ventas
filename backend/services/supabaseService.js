@@ -35,12 +35,15 @@ function mapOppToDB(opp) {
 
 // Mapear de DB al formato que espera metricsService
 function mapOppFromDB(row) {
+  const rawJson = row.raw_json || {};
   return {
     id: row.id,
     pipelineStageId: row.pipeline_stage_id,
     createdAt: row.created_at,
     dateAdded: row.created_at,
     updatedAt: row.updated_at,
+    lastStageChangeAt: rawJson.lastStageChangeAt || rawJson.lastStatusChangeAt || row.updated_at,
+    lastStatusChangeAt: rawJson.lastStatusChangeAt || row.updated_at,
     monetaryValue: row.monetary_value,
     source: row.source,
     status: row.status,
@@ -91,18 +94,9 @@ async function upsertOpportunities(opportunities) {
   return { total: opportunities.length, new: newCount, updated: updatedCount };
 }
 
-// Leer oportunidades de Supabase por rango de fechas
-// Usa buffer de 1 día para compensar diferencias de timezone (UTC vs local)
-// El filtro exacto por hora local se aplica después con metricsService.filterByDateRange
-async function getOpportunitiesFromDB(startDate, endDate) {
-  // Buffer de 1 día antes y después para cubrir cualquier timezone
-  const start = new Date(startDate);
-  start.setDate(start.getDate() - 1);
-  const end = new Date(endDate);
-  end.setDate(end.getDate() + 1);
-  const startISO = start.toISOString().split('T')[0] + 'T00:00:00';
-  const endISO = end.toISOString().split('T')[0] + 'T23:59:59';
-
+// Leer TODAS las oportunidades de Supabase (sin pre-filtro de fecha)
+// El filtro exacto por lastStageChangeAt se aplica después con metricsService.filterByDateRange
+async function getOpportunitiesFromDB() {
   let allRows = [];
   let from = 0;
   const PAGE_SIZE = 1000;
@@ -111,8 +105,6 @@ async function getOpportunitiesFromDB(startDate, endDate) {
     const { data, error } = await supabase
       .from('opportunities')
       .select('*')
-      .gte('created_at', startISO)
-      .lte('created_at', endISO)
       .range(from, from + PAGE_SIZE - 1);
 
     if (error) {
@@ -126,7 +118,7 @@ async function getOpportunitiesFromDB(startDate, endDate) {
     from += PAGE_SIZE;
   }
 
-  console.log(`📋 DB: ${allRows.length} oportunidades para ${startDate} - ${endDate}`);
+  console.log(`📋 DB: ${allRows.length} oportunidades totales cargadas`);
   return allRows.map(mapOppFromDB);
 }
 

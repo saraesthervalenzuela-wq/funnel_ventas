@@ -7,6 +7,7 @@
 [functions]
   node_bundler = "esbuild"
   included_files = ["../backend/**"]
+  external_node_modules = ["@anthropic-ai/sdk"]
 
 # Redirigir /api/metrics/* a la Netlify Function
 [[redirects]]

@@ -4,6 +4,7 @@ class MetricsService {
   constructor() {
     // IDs de las etapas del pipeline (obtenidos directamente de GHL)
     this.stageIds = {
+      noInteresado: '31db8524-1bd5-412d-974f-df98831b1212',         // E0. NO INTERESADO
       nuevoLead: 'a99b16a6-01b6-4570-b4c6-6bacc2fbf072',           // E1. NUEVO LEAD
       interesPendiente: '2d74b32b-c5d7-4e8a-9049-78d9ea7231c9',    // E2. INTERES EN VV
       seguimientoFotos: '6e4785c2-cd9a-4bf5-860c-bb27129678c7',    // E3. SEGUIMIENTO FOTOS
@@ -19,6 +20,7 @@ class MetricsService {
 
     // Nombres legibles para cada etapa
     this.stageNames = {
+      '31db8524-1bd5-412d-974f-df98831b1212': 'E0. NO INTERESADO',
       'a99b16a6-01b6-4570-b4c6-6bacc2fbf072': 'E1. NUEVO LEAD',
       '2d74b32b-c5d7-4e8a-9049-78d9ea7231c9': 'E2. INTERES EN VV',
       '6e4785c2-cd9a-4bf5-860c-bb27129678c7': 'E3. SEGUIMIENTO FOTOS',
@@ -34,6 +36,7 @@ class MetricsService {
 
     // Orden de las etapas para el funnel
     this.stageOrder = [
+      '31db8524-1bd5-412d-974f-df98831b1212',
       'a99b16a6-01b6-4570-b4c6-6bacc2fbf072',
       '2d74b32b-c5d7-4e8a-9049-78d9ea7231c9',
       '6e4785c2-cd9a-4bf5-860c-bb27129678c7',
@@ -48,19 +51,67 @@ class MetricsService {
     ];
   }
 
-  // Filtrar oportunidades por rango de fechas
+  // Filtrar oportunidades por rango de fechas (basado en fecha de cambio de etapa)
   filterByDateRange(opportunities, startDate, endDate) {
     // Parsear componentes manualmente para evitar bugs de timezone
-    // new Date("YYYY-MM-DD") se parsea como UTC, pero setHours opera en hora local
     const [sY, sM, sD] = startDate.split('-').map(Number);
     const [eY, eM, eD] = endDate.split('-').map(Number);
     const start = new Date(sY, sM - 1, sD, 0, 0, 0, 0);
     const end = new Date(eY, eM - 1, eD, 23, 59, 59, 999);
 
     return opportunities.filter(opp => {
-      const createdAt = new Date(opp.createdAt || opp.dateAdded);
-      return createdAt >= start && createdAt <= end;
+      // Usar lastStageChangeAt (fecha en que entró a la etapa actual)
+      const stageDate = new Date(opp.lastStageChangeAt || opp.lastStatusChangeAt || opp.createdAt || opp.dateAdded);
+      return stageDate >= start && stageDate <= end;
     });
+  }
+
+  // Snapshot actual: conteo de oportunidades por etapa SIN filtro de fecha
+  async getCurrentSnapshot() {
+    const allOpportunities = await ghlService.getOpportunities();
+    const now = Date.now();
+    const oneWeekMs = 7 * 24 * 60 * 60 * 1000;
+
+    const countByStage = {};
+    const staleByStage = {}; // Más de 1 semana en la etapa
+    this.stageOrder.forEach(id => {
+      countByStage[id] = 0;
+      staleByStage[id] = 0;
+    });
+
+    allOpportunities.forEach(opp => {
+      const stageId = opp.pipelineStageId;
+      if (countByStage[stageId] !== undefined) {
+        countByStage[stageId]++;
+        const stageDate = new Date(opp.lastStageChangeAt || opp.lastStatusChangeAt || opp.createdAt);
+        if (now - stageDate.getTime() > oneWeekMs) {
+          staleByStage[stageId]++;
+        }
+      }
+    });
+
+    const buildStageData = (stageId) => ({
+      count: countByStage[stageId] || 0,
+      stale: staleByStage[stageId] || 0
+    });
+
+    return {
+      total: allOpportunities.length,
+      porEtapa: {
+        e0_noInteresado: buildStageData(this.stageIds.noInteresado),
+        e1_nuevoLead: buildStageData(this.stageIds.nuevoLead),
+        e2_interes: buildStageData(this.stageIds.interesPendiente),
+        e3_seguimiento: buildStageData(this.stageIds.seguimientoFotos),
+        e4_fotosRecibidas: buildStageData(this.stageIds.fotosRecibidas),
+        e5_valoracionVirtual: buildStageData(this.stageIds.valoracionVirtual),
+        vvReagendada: buildStageData(this.stageIds.vvReagendada),
+        e6_noContesto: buildStageData(this.stageIds.vvNoContesto),
+        e7_valoracionRealizada: buildStageData(this.stageIds.valoracionRealizada),
+        e8_seguimientoCierre: buildStageData(this.stageIds.seguimientoCierre),
+        e9_deposito: buildStageData(this.stageIds.depositoRealizado),
+        e10_fechaCirugia: buildStageData(this.stageIds.fechaCirugia)
+      }
+    };
   }
 
   // Calcular todas las métricas con una sola consulta a GHL
@@ -200,6 +251,7 @@ class MetricsService {
         ? ((leadsCalificados / totalLeads) * 100).toFixed(2)
         : 0,
       porEtapa: {
+        e0_noInteresado: countByStage[this.stageIds.noInteresado] || 0,
         e1_nuevoLead: countByStage[this.stageIds.nuevoLead] || 0,
         e2_interes: countByStage[this.stageIds.interesPendiente] || 0,
         e3_seguimiento: countByStage[this.stageIds.seguimientoFotos] || 0,
@@ -445,8 +497,8 @@ class MetricsService {
     const stagesDeposito = [this.stageIds.depositoRealizado, this.stageIds.fechaCirugia];
 
     opportunities.forEach(opp => {
-      const date = new Date(opp.createdAt);
-      // Usar fecha local en vez de UTC para la agrupación diaria
+      // Usar lastStageChangeAt para agrupar por día (consistente con el filtro)
+      const date = new Date(opp.lastStageChangeAt || opp.lastStatusChangeAt || opp.createdAt);
       const dateKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 
       if (!dailyData[dateKey]) {

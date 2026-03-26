@@ -12,14 +12,18 @@ import {
 } from 'recharts'
 
 const GRADIENTS = [
-  { start: '#14b8a6', end: '#2dd4bf' },
-  { start: '#0ea5e9', end: '#38bdf8' },
-  { start: '#8b5cf6', end: '#a78bfa' },
-  { start: '#f59e0b', end: '#fbbf24' },
-  { start: '#22c55e', end: '#4ade80' },
-  { start: '#ec4899', end: '#f472b6' },
-  { start: '#6366f1', end: '#818cf8' },
-  { start: '#14b8a6', end: '#5eead4' }
+  { start: '#94a3b8', end: '#cbd5e1' },  // E0 - slate
+  { start: '#14b8a6', end: '#2dd4bf' },  // E1 - teal
+  { start: '#3b82f6', end: '#60a5fa' },  // E2 - blue
+  { start: '#06b6d4', end: '#22d3ee' },  // E3 - cyan
+  { start: '#6366f1', end: '#818cf8' },  // E4 - indigo
+  { start: '#8b5cf6', end: '#a78bfa' },  // E5 - purple
+  { start: '#f97316', end: '#fb923c' },  // VV - orange
+  { start: '#ef4444', end: '#f87171' },  // E6 - red
+  { start: '#ec4899', end: '#f472b6' },  // E7 - pink
+  { start: '#eab308', end: '#facc15' },  // E8 - yellow
+  { start: '#10b981', end: '#34d399' },  // E9 - emerald
+  { start: '#22c55e', end: '#4ade80' }   // E10 - green
 ]
 
 function StageDistribution({ stages }) {
@@ -78,7 +82,7 @@ function StageDistribution({ stages }) {
 
   return (
     <motion.div
-      className="h-72 relative"
+      className="relative" style={{ height: '480px' }}
       initial={{ opacity: 0, y: 30 }}
       whileInView={{ opacity: 1, y: 0 }}
       viewport={{ once: true, margin: "-50px" }}

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
 import Header from './components/Header'
 import MetricCards from './components/MetricCards'
+import StageMovement from './components/StageMovement'
 import FunnelChart from './components/FunnelChart'
 import StageDistribution from './components/StageDistribution'
 import SourcesTable from './components/SourcesTable'
@@ -22,6 +23,8 @@ function App() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [data, setData] = useState(null)
+  const [currentStages, setCurrentStages] = useState(null)
+  const [responseTime, setResponseTime] = useState(null)
   const [activeView, setActiveView] = useState('dashboard')
   const [dateRange, setDateRange] = useState(() => {
     const now = new Date()
@@ -49,15 +52,27 @@ function App() {
       const axios = (await import('axios')).default
       const params = { ...dateRange }
       if (force) params.force = 'true'
-      const response = await axios.get('/api/metrics/summary', {
-        params
-      })
 
-      if (response.data.success) {
-        setData(response.data.data)
+      // Cargar datos del periodo, snapshot actual y tiempo de respuesta en paralelo
+      const [summaryRes, currentRes, responseRes] = await Promise.all([
+        axios.get('/api/metrics/summary', { params }),
+        axios.get('/api/metrics/current-stages'),
+        axios.get('/api/metrics/response-time').catch(() => ({ data: { success: false } }))
+      ])
+
+      if (summaryRes.data.success) {
+        setData(summaryRes.data.data)
         setError(null)
       } else {
         setError('Error al obtener los datos')
+      }
+
+      if (currentRes.data.success) {
+        setCurrentStages(currentRes.data.data)
+      }
+
+      if (responseRes.data.success) {
+        setResponseTime(responseRes.data.data)
       }
     } catch (err) {
       console.error('Error fetching data:', err)
@@ -87,7 +102,7 @@ function App() {
   }
 
   const handleRefresh = () => {
-    fetchData(true)
+    fetchData(false)
   }
 
   const dateLabel = (() => {
@@ -212,8 +227,28 @@ function App() {
 
         {data && (
           <div className={`space-y-6 sm:space-y-8 lg:space-y-10 transition-opacity duration-300 ${loading ? 'opacity-50 pointer-events-none' : 'opacity-100'}`}>
-            {/* Métricas principales */}
-            <MetricCards metrics={data.funnel} />
+            {/* Estado actual del pipeline - SIN filtro de fecha */}
+            <MetricCards currentStages={currentStages} />
+
+            {/* Movimiento por periodo - CON filtro de fecha */}
+            <motion.section
+              initial={{ opacity: 0, y: 40, scale: 0.95 }}
+              whileInView={{ opacity: 1, y: 0, scale: 1 }}
+              viewport={{ once: true, margin: "-100px" }}
+              transition={{ duration: 0.7, ease: [0.22, 1, 0.36, 1] }}
+              className="chart-card"
+            >
+              <div className="flex items-center justify-between mb-6">
+                <div>
+                  <h3 className="text-2xl font-bold text-white tracking-tight font-display">
+                    Movimiento por Periodo
+                  </h3>
+                  <p className="text-base text-white/40 mt-2">Oportunidades que entraron a cada etapa en el periodo seleccionado</p>
+                </div>
+                <span className="badge badge-teal">{dateLabel}</span>
+              </div>
+              <StageMovement funnel={data.funnel} />
+            </motion.section>
 
             {/* Gráficos principales - 2 columnas */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6 lg:gap-8">
@@ -234,7 +269,7 @@ function App() {
                   </div>
                   <span className="badge badge-teal">En vivo</span>
                 </div>
-                <FunnelChart data={data.funnel} />
+                <FunnelChart data={data.funnel} responseTime={responseTime} />
               </motion.section>
 
               {/* Distribución por Etapas */}

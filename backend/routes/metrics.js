@@ -21,6 +21,27 @@ const getCurrentMonthRange = () => {
   };
 };
 
+// Snapshot actual: oportunidades por etapa SIN filtro de fecha
+router.get('/current-stages', async (req, res) => {
+  try {
+    const data = await metricsService.getCurrentSnapshot();
+    res.json({ success: true, data });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Tiempo promedio de respuesta en conversaciones
+router.get('/response-time', async (req, res) => {
+  try {
+    const ghlService = require('../services/ghlService');
+    const data = await ghlService.getAverageResponseTime(30);
+    res.json({ success: true, data });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 // Métricas principales del funnel
 router.get('/funnel', async (req, res) => {
   try {
@@ -151,7 +172,7 @@ router.get('/trend', async (req, res) => {
   }
 });
 
-// Resumen completo — lee de Supabase DB, sync solo con force=true
+// Resumen completo — calcula desde caché GHL en memoria (5 min TTL)
 router.get('/summary', async (req, res) => {
   try {
     const { startDate, endDate, force } = req.query;
@@ -161,65 +182,19 @@ router.get('/summary', async (req, res) => {
 
     const forceRefresh = force === 'true';
 
-    // === FORCE: Sync completo desde GHL ===
+    // Si force, invalidar caché y re-sync
     if (forceRefresh) {
       console.log('🔄 Refresh forzado — ejecutando sync completo...');
-      const syncResult = await performSync('manual');
-
-      // Leer oportunidades frescas de la DB y filtrar con timezone local
-      const rawOpps = await getOpportunitiesFromDB(dateRange.startDate, dateRange.endDate);
-      const opportunities = metricsService.filterByDateRange(rawOpps, dateRange.startDate, dateRange.endDate);
-      const data = metricsService.calculateAllMetricsFromArray(opportunities);
-
-      // Guardar snapshot para este rango específico
-      await insertSnapshot(dateRange.startDate, dateRange.endDate, 'manual', data, opportunities.length);
-
-      return res.json({
-        success: true,
-        dateRange,
-        source: 'sync',
-        syncInfo: {
-          total: syncResult.total,
-          new: syncResult.new,
-          updated: syncResult.updated,
-          duration: syncResult.duration
-        },
-        data
-      });
+      await performSync('manual');
     }
 
-    // === NORMAL: Intentar snapshot reciente ===
-    const snapshot = await getLatestSnapshot(dateRange.startDate, dateRange.endDate);
-    if (snapshot) {
-      return res.json({
-        success: true,
-        dateRange,
-        source: 'snapshot',
-        data: snapshot
-      });
-    }
-
-    // === Sin snapshot: Leer de tabla opportunities ===
-    const dbCount = await getOpportunityCount();
-
-    if (dbCount === 0) {
-      // Primera vez — hacer bootstrap sync
-      console.log('🚀 DB vacía — ejecutando sync inicial (bootstrap)...');
-      await performSync('bootstrap');
-    }
-
-    // Leer oportunidades del rango desde DB y filtrar con timezone local
-    const rawOpps = await getOpportunitiesFromDB(dateRange.startDate, dateRange.endDate);
-    const opportunities = metricsService.filterByDateRange(rawOpps, dateRange.startDate, dateRange.endDate);
-    const data = metricsService.calculateAllMetricsFromArray(opportunities);
-
-    // Guardar snapshot
-    await insertSnapshot(dateRange.startDate, dateRange.endDate, 'query', data, opportunities.length);
+    // Calcular métricas desde GHL (usa caché en memoria de 5 min)
+    const data = await metricsService.calculateAllMetrics(dateRange.startDate, dateRange.endDate);
 
     res.json({
       success: true,
       dateRange,
-      source: 'database',
+      source: forceRefresh ? 'sync' : 'cache',
       data
     });
 

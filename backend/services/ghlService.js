@@ -1,6 +1,8 @@
 const axios = require('axios');
 
-const GHL_API_BASE = 'https://rest.gohighlevel.com/v1';
+// API v2 de GHL (Integraciones Privadas)
+const GHL_API_BASE = 'https://services.leadconnectorhq.com';
+const GHL_API_VERSION = '2021-07-28';
 
 class GHLService {
   constructor() {
@@ -12,7 +14,8 @@ class GHLService {
       baseURL: GHL_API_BASE,
       headers: {
         'Authorization': `Bearer ${this.apiKey}`,
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
+        'Version': GHL_API_VERSION
       }
     });
 
@@ -34,12 +37,17 @@ class GHLService {
   }
 
   // Hacer petición con reintentos automáticos para errores 429
-  async makeRequest(method, url, options = {}, retryCount = 0) {
+  async makeRequest(method, url, dataOrOptions = {}, retryCount = 0) {
     try {
       // Delay entre peticiones para evitar rate limiting
       await this.sleep(this.requestDelay);
 
-      const response = await this.client[method](url, options);
+      let response;
+      if (method === 'post' || method === 'put' || method === 'patch') {
+        response = await this.client[method](url, dataOrOptions);
+      } else {
+        response = await this.client[method](url, dataOrOptions);
+      }
       return response;
     } catch (error) {
       // Si es error 429 (Too Many Requests), reintentar con backoff exponencial
@@ -87,22 +95,20 @@ class GHLService {
     try {
       let allOpportunities = [];
       let hasMore = true;
-      let startAfterId = null;
-      let startAfter = null;
+      let page = 1;
       let pageCount = 0;
 
-      console.log('🔽 Descargando oportunidades de GHL...');
+      console.log('🔽 Descargando oportunidades de GHL (API v2)...');
 
       while (hasMore) {
-        const params = { limit: 100 };
-        if (startAfterId) {
-          params.startAfterId = startAfterId;
-          params.startAfter = startAfter;
-        }
-
-        const response = await this.makeRequest('get', `/pipelines/${this.pipelineId}/opportunities`, {
-          params
+        const params = new URLSearchParams({
+          location_id: this.locationId,
+          pipeline_id: this.pipelineId,
+          limit: 100,
+          page: page
         });
+
+        const response = await this.makeRequest('get', `/opportunities/search?${params.toString()}`);
 
         const opportunities = response.data.opportunities || [];
         allOpportunities = [...allOpportunities, ...opportunities];
@@ -111,9 +117,8 @@ class GHLService {
         console.log(`  Página ${pageCount}: ${opportunities.length} (Total: ${allOpportunities.length})`);
 
         const meta = response.data.meta;
-        if (meta && meta.nextPage && opportunities.length === 100) {
-          startAfterId = meta.startAfterId;
-          startAfter = meta.startAfter;
+        if (meta && meta.total > allOpportunities.length && opportunities.length === 100) {
+          page++;
         } else {
           hasMore = false;
         }
@@ -123,6 +128,9 @@ class GHLService {
       return allOpportunities;
     } catch (error) {
       console.error('Error obteniendo oportunidades:', error.message);
+      if (error.response?.data) {
+        console.error('Detalle del error:', JSON.stringify(error.response.data));
+      }
       if (error.response?.status === 429) {
         throw new Error('La API de Go High Level está limitando las solicitudes. Por favor espera unos minutos e intenta de nuevo.');
       }
@@ -130,10 +138,12 @@ class GHLService {
     }
   }
 
-  // Obtener etapas del pipeline
+  // Obtener etapas del pipeline (API v2)
   async getPipelineStages() {
     try {
-      const response = await this.makeRequest('get', `/pipelines/${this.pipelineId}`);
+      const response = await this.makeRequest('get', `/opportunities/pipelines/${this.pipelineId}`, {
+        params: { locationId: this.locationId }
+      });
       return response.data.stages || [];
     } catch (error) {
       console.error('Error obteniendo etapas:', error.message);
@@ -141,10 +151,10 @@ class GHLService {
     }
   }
 
-  // Obtener historial de una oportunidad (para calcular tiempos)
+  // Obtener detalle de una oportunidad (API v2)
   async getOpportunityHistory(opportunityId) {
     try {
-      const response = await this.makeRequest('get', `/pipelines/opportunities/${opportunityId}`);
+      const response = await this.makeRequest('get', `/opportunities/${opportunityId}`);
       return response.data;
     } catch (error) {
       console.error('Error obteniendo historial:', error.message);
@@ -152,7 +162,98 @@ class GHLService {
     }
   }
 
-  // Obtener contacto con detalles
+  // Obtener conversaciones recientes (API v2)
+  async getRecentConversations(limit = 50) {
+    try {
+      const params = new URLSearchParams({
+        locationId: this.locationId,
+        limit: limit,
+        sortBy: 'last_message_date',
+        sortOrder: 'desc'
+      });
+      const response = await this.makeRequest('get', `/conversations/search?${params.toString()}`);
+      return response.data.conversations || [];
+    } catch (error) {
+      console.error('Error obteniendo conversaciones:', error.message);
+      throw error;
+    }
+  }
+
+  // Obtener mensajes de una conversación (API v2)
+  async getConversationMessages(conversationId, limit = 20) {
+    try {
+      const response = await this.makeRequest('get', `/conversations/${conversationId}/messages?limit=${limit}`);
+      return response.data.messages?.messages || [];
+    } catch (error) {
+      console.error('Error obteniendo mensajes:', error.message);
+      return [];
+    }
+  }
+
+  // Calcular tiempo promedio de respuesta
+  async getAverageResponseTime(sampleSize = 30) {
+    // Usar caché para no saturar la API
+    if (this._cachedResponseTime && this._responseTimeCacheTs) {
+      const age = Date.now() - this._responseTimeCacheTs;
+      if (age < 10 * 60 * 1000) { // 10 min cache
+        return this._cachedResponseTime;
+      }
+    }
+
+    try {
+      const conversations = await this.getRecentConversations(sampleSize);
+      const responseTimes = [];
+
+      for (const conv of conversations) {
+        const messages = await this.getConversationMessages(conv.id, 20);
+        if (!messages || messages.length < 2) continue;
+
+        // Ordenar por fecha ascendente
+        const sorted = [...messages].sort((a, b) =>
+          new Date(a.dateAdded) - new Date(b.dateAdded)
+        );
+
+        // Buscar pares inbound → primer outbound
+        for (let i = 0; i < sorted.length - 1; i++) {
+          if (sorted[i].direction === 'inbound') {
+            // Buscar el siguiente outbound
+            for (let j = i + 1; j < sorted.length; j++) {
+              if (sorted[j].direction === 'outbound') {
+                const inTime = new Date(sorted[i].dateAdded);
+                const outTime = new Date(sorted[j].dateAdded);
+                const diffMinutes = (outTime - inTime) / (1000 * 60);
+                // Solo contar si es razonable (< 24 horas)
+                if (diffMinutes > 0 && diffMinutes < 1440) {
+                  responseTimes.push(diffMinutes);
+                }
+                break;
+              }
+            }
+          }
+        }
+      }
+
+      const result = {
+        avgMinutes: responseTimes.length > 0
+          ? Math.round(responseTimes.reduce((a, b) => a + b, 0) / responseTimes.length)
+          : 0,
+        medianMinutes: responseTimes.length > 0
+          ? Math.round(responseTimes.sort((a, b) => a - b)[Math.floor(responseTimes.length / 2)])
+          : 0,
+        samplesAnalyzed: responseTimes.length,
+        conversationsChecked: conversations.length
+      };
+
+      this._cachedResponseTime = result;
+      this._responseTimeCacheTs = Date.now();
+      return result;
+    } catch (error) {
+      console.error('Error calculando tiempo de respuesta:', error.message);
+      return { avgMinutes: 0, medianMinutes: 0, samplesAnalyzed: 0, conversationsChecked: 0 };
+    }
+  }
+
+  // Obtener contacto con detalles (API v2)
   async getContact(contactId) {
     try {
       const response = await this.makeRequest('get', `/contacts/${contactId}`);
@@ -163,28 +264,28 @@ class GHLService {
     }
   }
 
-  // Obtener todos los contactos
+  // Obtener todos los contactos (API v2)
   async getContacts(startDate = null, endDate = null) {
     try {
-      const params = { limit: 100 };
-      if (startDate) params.startAfter = startDate;
-
       let allContacts = [];
       let hasMore = true;
-      let startAfterId = null;
+      let page = 1;
 
       while (hasMore) {
-        const requestParams = { ...params };
-        if (startAfterId) requestParams.startAfterId = startAfterId;
+        const params = {
+          locationId: this.locationId,
+          limit: 100,
+          page: page
+        };
 
-        const response = await this.makeRequest('get', '/contacts/', { params: requestParams });
+        const response = await this.makeRequest('get', '/contacts/', { params });
         const contacts = response.data.contacts || [];
         allContacts = [...allContacts, ...contacts];
 
         if (contacts.length < 100) {
           hasMore = false;
         } else {
-          startAfterId = contacts[contacts.length - 1].id;
+          page++;
         }
       }
 

@@ -42,9 +42,9 @@ function ErrorAlert({ message, onRetry }) {
             }}
           >
             {[
-              'Verifica que el archivo .env esté configurado correctamente',
+              'Verifica tu conexión a internet',
               'Asegúrate de que tu API Key de GHL sea válida',
-              'Confirma que el backend esté corriendo en el puerto 3001'
+              'Intenta recargar la página en unos segundos'
             ].map((tip, index) => (
               <p key={index} className="text-xs text-white/50 flex items-center gap-3 font-medium">
                 <HelpCircle className="h-3.5 w-3.5 text-teal-400 flex-shrink-0" />
