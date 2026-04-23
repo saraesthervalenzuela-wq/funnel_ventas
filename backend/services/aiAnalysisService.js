@@ -1,6 +1,5 @@
 const Anthropic = require('@anthropic-ai/sdk').default;
 const metricsService = require('./metricsService');
-const metaAdsService = require('./metaAdsService');
 const { getLatestSnapshot, getOpportunitiesFromDB } = require('./supabaseService');
 
 // Cache en memoria (10 min TTL)
@@ -84,9 +83,7 @@ CRITERIOS DE EVALUACIÓN:
 - Tasa de contacto (calificados/total) saludable: >60%
 - Tasa de conversión (cierres/total) saludable: >5%
 - Tiempo promedio de cierre saludable: <30 días
-- CPL (costo por lead de Meta) preocupante: >$15 USD
 - Si hay días sin leads en la tendencia, es un foco rojo
-- Si una fuente tiene muchos leads pero 0 cierres, es un cuello de botella
 - Si E3 o E6 tienen muchos leads, el seguimiento está fallando`;
 
 async function analyze(startDate, endDate) {
@@ -116,31 +113,8 @@ async function analyze(startDate, endDate) {
     summaryData = metricsService.calculateAllMetricsFromArray(opportunities);
   }
 
-  // Obtener datos de Meta Ads (opcional, no bloquea si falla)
-  let metaData = null;
-  try {
-    const metaSummary = await metaAdsService.getAccountSummary(startDate, endDate);
-    metaData = {
-      totalCampaigns: metaSummary.totalCampaigns,
-      spend: metaSummary.spend,
-      leads: metaSummary.leads,
-      conversations: metaSummary.conversations,
-      avgCostPerLead: metaSummary.avgCostPerLead,
-      ctr: metaSummary.ctr,
-      campaigns: (metaSummary.campaigns || []).map(c => ({
-        name: c.campaignName,
-        spend: c.spend,
-        leads: c.leads,
-        costPerLead: c.costPerLead,
-        conversations: c.conversations
-      }))
-    };
-  } catch (err) {
-    console.log('⚠️ No se pudieron obtener datos de Meta Ads para análisis:', err.message);
-  }
-
   // Construir el prompt con datos
-  const dataPrompt = buildDataPrompt(summaryData, metaData, startDate, endDate);
+  const dataPrompt = buildDataPrompt(summaryData, startDate, endDate);
 
   // Llamar a Claude API
   console.log('🤖 Enviando datos a Claude para análisis...');
@@ -176,7 +150,7 @@ async function analyze(startDate, endDate) {
   return result;
 }
 
-function buildDataPrompt(data, metaData, startDate, endDate) {
+function buildDataPrompt(data, startDate, endDate) {
   let prompt = `Analiza las siguientes métricas del funnel de ventas de Ciplastic para el periodo ${startDate} al ${endDate}:\n\n`;
 
   // Funnel
@@ -237,24 +211,6 @@ function buildDataPrompt(data, metaData, startDate, endDate) {
     prompt += `- Mínimo: ${t.tiempoMinimoCierre || 0} días\n`;
     prompt += `- Máximo: ${t.tiempoMaximoCierre || 0} días\n`;
     prompt += `- Oportunidades analizadas: ${t.oportunidadesAnalizadas || 0}\n`;
-    prompt += '\n';
-  }
-
-  // Meta Ads
-  if (metaData) {
-    prompt += `## META ADS (Facebook/Instagram)\n`;
-    prompt += `- Campañas activas: ${metaData.totalCampaigns}\n`;
-    prompt += `- Gasto total: $${(metaData.spend || 0).toLocaleString()}\n`;
-    prompt += `- Leads generados: ${metaData.leads || 0}\n`;
-    prompt += `- Conversaciones: ${metaData.conversations || 0}\n`;
-    prompt += `- Costo por lead promedio: $${(metaData.avgCostPerLead || 0).toFixed(2)}\n`;
-    prompt += `- CTR: ${metaData.ctr || '0'}%\n`;
-    if (metaData.campaigns?.length) {
-      prompt += `\nDesglose por campaña:\n`;
-      metaData.campaigns.forEach(c => {
-        prompt += `  - ${c.name}: gasto $${(c.spend || 0).toLocaleString()}, ${c.leads || 0} leads, CPL $${(c.costPerLead || 0).toFixed(2)}, ${c.conversations || 0} conversaciones\n`;
-      });
-    }
     prompt += '\n';
   }
 

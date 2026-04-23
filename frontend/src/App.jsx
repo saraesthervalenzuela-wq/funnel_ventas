@@ -5,12 +5,10 @@ import MetricCards from './components/MetricCards'
 import StageMovement from './components/StageMovement'
 import FunnelChart from './components/FunnelChart'
 import StageDistribution from './components/StageDistribution'
-import SourcesTable from './components/SourcesTable'
 import TrendChart from './components/TrendChart'
 import TimeMetrics from './components/TimeMetrics'
 import LoadingSpinner from './components/LoadingSpinner'
 import ErrorAlert from './components/ErrorAlert'
-import MetaCampaigns from './components/MetaCampaigns'
 import ReportBuilder from './components/ReportBuilder'
 import AnalysisView from './components/AnalysisView'
 import DarkVeil from './components/DarkVeil'
@@ -343,44 +341,6 @@ function App() {
               </motion.section>
             </div>
 
-            {/* Tabla de Fuentes */}
-            <motion.section
-              initial={{ opacity: 0, y: 60, scale: 0.95 }}
-              whileInView={{ opacity: 1, y: 0, scale: 1 }}
-              viewport={{ once: true, margin: "-50px" }}
-              transition={{ duration: 0.9, ease: [0.22, 1, 0.36, 1] }}
-              className="chart-card"
-            >
-              <div className="flex items-center justify-between mb-8">
-                <div>
-                  <h3 className="text-2xl font-bold text-white tracking-tight font-display">
-                    Rendimiento por Fuente
-                  </h3>
-                  <p className="text-base text-white/40 mt-2">Análisis de campañas y canales de adquisición</p>
-                </div>
-              </div>
-              <SourcesTable sources={data.sources} dateRange={dateRange} />
-            </motion.section>
-
-            {/* Campañas de Meta Ads */}
-            <motion.section
-              initial={{ opacity: 0, y: 60, scale: 0.95 }}
-              whileInView={{ opacity: 1, y: 0, scale: 1 }}
-              viewport={{ once: true, margin: "-50px" }}
-              transition={{ duration: 0.9, delay: 0.1, ease: [0.22, 1, 0.36, 1] }}
-              className="chart-card"
-            >
-              <div className="flex items-center justify-between mb-8">
-                <div>
-                  <h3 className="text-2xl font-bold text-white tracking-tight font-display">
-                    Campañas Meta Ads
-                  </h3>
-                  <p className="text-base text-white/40 mt-2">Rendimiento de Facebook e Instagram Ads</p>
-                </div>
-                <span className="badge badge-teal">Meta API</span>
-              </div>
-              <MetaCampaigns dateRange={dateRange} />
-            </motion.section>
           </div>
         )}
       </main>

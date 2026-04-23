@@ -1,8 +1,5 @@
 const Anthropic = require('@anthropic-ai/sdk').default;
-const axios = require('axios');
 const { createClient } = require('@supabase/supabase-js');
-
-const META_GRAPH_URL = 'https://graph.facebook.com/v21.0';
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -134,48 +131,14 @@ function buildSimpleMetrics(opportunities) {
   };
 }
 
-// --- Meta Ads data ---
-async function getMetaData(startDate, endDate) {
-  if (!process.env.META_ACCESS_TOKEN || !process.env.META_AD_ACCOUNT_ID) return null;
-  try {
-    const res = await axios.get(`${META_GRAPH_URL}/${process.env.META_AD_ACCOUNT_ID}/insights`, {
-      params: {
-        access_token: process.env.META_ACCESS_TOKEN,
-        fields: 'campaign_name,campaign_id,impressions,clicks,spend,actions,cost_per_action_type',
-        time_range: JSON.stringify({ since: startDate, until: endDate }),
-        level: 'campaign', limit: 100
-      }
-    });
-    const raw = res.data.data || [];
-    let totalSpend = 0, totalLeads = 0, totalConv = 0;
-    const campaigns = raw.map(item => {
-      const actions = item.actions || [];
-      const leads = getActionValue(actions, ['onsite_conversion.messaging_conversation_started_7d', 'lead']);
-      const conv = getActionValue(actions, ['onsite_conversion.messaging_conversation_started_7d']);
-      const spend = parseFloat(item.spend || 0);
-      totalSpend += spend; totalLeads += leads; totalConv += conv;
-      return { name: item.campaign_name, spend, leads, conversations: conv, costPerLead: leads > 0 ? spend / leads : 0 };
-    });
-    return { totalCampaigns: campaigns.length, spend: totalSpend, leads: totalLeads, conversations: totalConv, avgCostPerLead: totalLeads > 0 ? totalSpend / totalLeads : 0, campaigns };
-  } catch (e) { return null; }
-}
-
-function getActionValue(actions, types) {
-  for (const type of types) {
-    const a = actions.find(a => a.action_type === type);
-    if (a) return parseInt(a.value || 0);
-  }
-  return 0;
-}
-
 // --- System prompt ---
-const SYSTEM_PROMPT = `Analista de ventas para Ciplastic (clínica de cirugía plástica, México). Pipeline: 10 etapas, E1=Nuevo Lead, E9=Depósito, E10=Fecha Cirugía. Calificados=avanzaron de E1. Cierres=E9+E10. Tasa contacto sana:>60%, conversión sana:>5%, cierre sano:<30 días, CPL preocupante:>$15 USD.
+const SYSTEM_PROMPT = `Analista de ventas para Ciplastic (clínica de cirugía plástica, México). Pipeline: 10 etapas, E1=Nuevo Lead, E9=Depósito, E10=Fecha Cirugía. Calificados=avanzaron de E1. Cierres=E9+E10. Tasa contacto sana:>60%, conversión sana:>5%, cierre sano:<30 días.
 
 Responde SOLO JSON válido, SIN markdown. Sé breve y directo. Máximo 3 alertas, 2 insights, 2 recomendaciones.
 
 {"resumenEjecutivo":"string","puntuacionSalud":number,"alertas":[{"tipo":"critico|advertencia|info","titulo":"string","detalle":"string","metrica":"string","recomendacion":"string"}],"insights":[{"categoria":"funnel|fuentes|campanas|tiempos|tendencia","titulo":"string","detalle":"string"}],"recomendaciones":[{"prioridad":"alta|media|baja","accion":"string","impactoEsperado":"string"}]}`;
 
-function buildDataPrompt(data, metaData, startDate, endDate) {
+function buildDataPrompt(data, startDate, endDate) {
   let p = `Analiza las siguientes métricas del funnel de ventas de Ciplastic para el periodo ${startDate} al ${endDate}:\n\n`;
 
   if (data.funnel) {
@@ -194,14 +157,6 @@ function buildDataPrompt(data, metaData, startDate, endDate) {
   if (data.times) {
     const t = data.times;
     p += `## TIEMPOS DE CIERRE\n- Promedio: ${t.promedioTiempoCierre} días\n- Mínimo: ${t.tiempoMinimoCierre} días\n- Máximo: ${t.tiempoMaximoCierre} días\n- Analizadas: ${t.oportunidadesAnalizadas}\n\n`;
-  }
-  if (metaData) {
-    p += `## META ADS\n- Gasto: $${(metaData.spend || 0).toLocaleString()}\n- Leads: ${metaData.leads}\n- CPL: $${(metaData.avgCostPerLead || 0).toFixed(2)}\n`;
-    if (metaData.campaigns?.length) {
-      p += `\nCampañas:\n`;
-      metaData.campaigns.forEach(c => { p += `  - ${c.name}: gasto $${(c.spend || 0).toLocaleString()}, ${c.leads} leads, CPL $${(c.costPerLead || 0).toFixed(2)}\n`; });
-    }
-    p += '\n';
   }
   p += `\nResponde JSON breve.`;
   return p;
@@ -247,11 +202,9 @@ exports.handler = async (event) => {
       const opportunities = filterByDateRange(rawOpps, startDate, endDate);
       summaryData = buildSimpleMetrics(opportunities);
     }
-    const metaData = null; // Skip Meta API para evitar timeout
-
     // Llamar a Claude con modelo rápido
     const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-    const dataPrompt = buildDataPrompt(summaryData, metaData, startDate, endDate);
+    const dataPrompt = buildDataPrompt(summaryData, startDate, endDate);
 
     const response = await client.messages.create({
       model: 'claude-haiku-4-5-20251001',

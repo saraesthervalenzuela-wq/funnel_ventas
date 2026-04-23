@@ -15,12 +15,6 @@
   to = "/.netlify/functions/metrics/:splat"
   status = 200
 
-# Redirigir /api/meta/* a la Netlify Function de Meta
-[[redirects]]
-  from = "/api/meta/campaigns"
-  to = "/.netlify/functions/meta"
-  status = 200
-
 # Redirigir /api/ai/* a la Netlify Function de AI
 [[redirects]]
   from = "/api/ai/analyze"
