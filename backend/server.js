@@ -6,7 +6,6 @@ const cron = require('node-cron');
 
 const ghlRoutes = require('./routes/ghl');
 const metricsRoutes = require('./routes/metrics');
-const metaRoutes = require('./routes/meta');
 const aiRoutes = require('./routes/ai');
 const { performSync } = require('./services/supabaseService');
 
@@ -20,7 +19,6 @@ app.use(express.json());
 // API Routes
 app.use('/api/ghl', ghlRoutes);
 app.use('/api/metrics', metricsRoutes);
-app.use('/api/meta', metaRoutes);
 app.use('/api/ai', aiRoutes);
 
 // Health check

@@ -1,17 +1,13 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   TrendingUp,
-  Globe,
-  Megaphone,
   BarChart3,
   LineChart,
   Clock,
   Check,
   FileDown,
-  Loader2,
-  CheckSquare,
-  Square
+  Loader2
 } from 'lucide-react'
 
 const REPORT_SECTIONS = [
@@ -21,20 +17,6 @@ const REPORT_SECTIONS = [
     description: 'Total leads, calificados, cierres y tasas de conversion',
     icon: TrendingUp,
     gradient: 'from-teal-500 to-cyan-400'
-  },
-  {
-    id: 'sources',
-    label: 'Rendimiento por Fuente',
-    description: 'Desglose por canal: Facebook, Instagram, WhatsApp, etc.',
-    icon: Globe,
-    gradient: 'from-blue-500 to-sky-400'
-  },
-  {
-    id: 'metaCampaigns',
-    label: 'Campanas Meta Ads',
-    description: 'Gasto, conversaciones, leads y cierres por campana',
-    icon: Megaphone,
-    gradient: 'from-purple-500 to-violet-400'
   },
   {
     id: 'stages',
@@ -62,32 +44,6 @@ const REPORT_SECTIONS = [
 function ReportBuilder({ data, dateRange, dateLabel }) {
   const [selectedSections, setSelectedSections] = useState(new Set())
   const [generating, setGenerating] = useState(false)
-  const [metaCampaigns, setMetaCampaigns] = useState(null)
-  const [loadingMeta, setLoadingMeta] = useState(false)
-
-  // Fetch Meta campaigns cuando se selecciona esa seccion
-  useEffect(() => {
-    if (selectedSections.has('metaCampaigns') && !metaCampaigns && dateRange) {
-      fetchMetaCampaigns()
-    }
-  }, [selectedSections])
-
-  const fetchMetaCampaigns = async () => {
-    setLoadingMeta(true)
-    try {
-      const axios = (await import('axios')).default
-      const response = await axios.get('/api/meta/campaigns', {
-        params: { startDate: dateRange.startDate, endDate: dateRange.endDate }
-      })
-      if (response.data.success) {
-        setMetaCampaigns(response.data.data)
-      }
-    } catch (err) {
-      console.error('Error fetching Meta campaigns:', err)
-    } finally {
-      setLoadingMeta(false)
-    }
-  }
 
   const toggleSection = (id) => {
     setSelectedSections(prev => {
@@ -114,7 +70,6 @@ function ReportBuilder({ data, dateRange, dateLabel }) {
       await generateReport({
         selectedSections,
         data,
-        metaCampaigns,
         dateRange,
         dateLabel
       })
@@ -151,63 +106,6 @@ function ReportBuilder({ data, dateRange, dateLabel }) {
                 <p className="text-lg font-extrabold text-white mt-1">{typeof value === 'number' ? value.toLocaleString() : value}</p>
               </div>
             ))}
-          </div>
-        )
-
-      case 'sources':
-        if (!data?.sources) return null
-        return (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
-                  {['Fuente', 'Leads', 'Calificados', 'Cierres', 'Valor', 'Conv.'].map(h => (
-                    <th key={h} className="py-2 px-2 text-[10px] font-bold text-white/40 uppercase tracking-wider text-left">{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {data.sources.map((s, i) => (
-                  <tr key={i} style={{ borderBottom: '1px solid rgba(255,255,255,0.03)' }}>
-                    <td className="py-2 px-2 text-white/80 font-medium">{s.source}</td>
-                    <td className="py-2 px-2 text-white font-bold">{s.total}</td>
-                    <td className="py-2 px-2 text-white/50">{s.calificados}</td>
-                    <td className="py-2 px-2 text-cyan-400 font-bold">{s.depositos}</td>
-                    <td className="py-2 px-2 text-white">${s.valorTotal.toLocaleString()}</td>
-                    <td className="py-2 px-2 text-teal-400">{s.tasaConversion}%</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )
-
-      case 'metaCampaigns':
-        if (loadingMeta) return <div className="flex items-center gap-2 py-4"><Loader2 className="w-4 h-4 text-teal-400 animate-spin" /><span className="text-white/40 text-sm">Cargando campanas...</span></div>
-        if (!metaCampaigns) return <p className="text-white/30 text-sm py-4">Selecciona para cargar datos de Meta Ads</p>
-        return (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
-                  {['Campana', 'Gasto', 'Conv.', 'Leads CRM', 'Calif.', 'Cierres'].map(h => (
-                    <th key={h} className="py-2 px-2 text-[10px] font-bold text-white/40 uppercase tracking-wider text-left">{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {metaCampaigns.campaigns.map((c, i) => (
-                  <tr key={i} style={{ borderBottom: '1px solid rgba(255,255,255,0.03)' }}>
-                    <td className="py-2 px-2 text-white/80 font-medium max-w-[200px] truncate">{c.campaignName}</td>
-                    <td className="py-2 px-2 text-amber-400 font-bold">${c.spend.toLocaleString('en-US', { maximumFractionDigits: 0 })}</td>
-                    <td className="py-2 px-2 text-cyan-400 font-bold">{c.leads}</td>
-                    <td className="py-2 px-2 text-white font-bold">{c.ghlLeads || 0}</td>
-                    <td className="py-2 px-2 text-purple-400">{c.ghlCalificados || 0}</td>
-                    <td className="py-2 px-2 text-green-400 font-bold">{c.ghlCierres || 0}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
           </div>
         )
 

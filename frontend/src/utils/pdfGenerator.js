@@ -192,96 +192,6 @@ function renderFunnel(doc, data, startY) {
   return y + Math.ceil(m.length / 4) * (ch + 4) + SPACING
 }
 
-// --- Rendimiento por Fuente ---
-function renderSources(doc, data, startY) {
-  let y = ensureSpace(doc, startY, 80)
-  y = sectionTitle(doc, 'Rendimiento por Fuente', y)
-  if (!data.sources?.length) return y
-
-  autoTable(doc, {
-    startY: y, margin: { left: 20, right: 20 },
-    head: [['Fuente', 'Leads', 'Calificados', 'Cierres', 'Valor', 'Conv.']],
-    body: data.sources.map(s => [
-      s.source, s.total, s.calificados, s.depositos,
-      `$${(s.valorTotal || 0).toLocaleString()}`, `${s.tasaConversion}%`
-    ]),
-    ...tableStyles(),
-    columnStyles: {
-      0: { textColor: C.text, fontStyle: 'bold' },
-      1: { halign: 'center', textColor: C.text, fontStyle: 'bold' },
-      2: { halign: 'center' },
-      3: { halign: 'center', textColor: C.green, fontStyle: 'bold' },
-      4: { halign: 'right', textColor: C.text },
-      5: { halign: 'center', textColor: C.teal, fontStyle: 'bold' }
-    }
-  })
-
-  const endY = doc.lastAutoTable?.finalY || y + 50
-  const tl = data.sources.reduce((s, r) => s + r.total, 0)
-  const tc = data.sources.reduce((s, r) => s + r.depositos, 0)
-  const tv = data.sources.reduce((s, r) => s + r.valorTotal, 0)
-  doc.setFontSize(7)
-  doc.setFont('helvetica', 'bold')
-  doc.setTextColor(...C.textLight)
-  doc.text(`Total Leads: ${tl}   |   Cierres: ${tc}   |   Valor: $${tv.toLocaleString()}`, 20, endY + 5)
-  return endY + 5 + SPACING
-}
-
-// --- Campanas Meta Ads ---
-function renderMeta(doc, metaCampaigns, startY) {
-  let y = ensureSpace(doc, startY, 90)
-  y = sectionTitle(doc, 'Campanas Meta Ads', y)
-  if (!metaCampaigns?.campaigns?.length) {
-    doc.setFontSize(9)
-    doc.setTextColor(...C.textLight)
-    doc.text('No hay datos de campanas Meta disponibles', 20, y + 8)
-    return y + 16 + SPACING
-  }
-
-  const camps = metaCampaigns.campaigns
-  const gt = metaCampaigns.ghlTotals || {}
-  const spend = camps.reduce((s, c) => s + (c.spend || 0), 0)
-  const conv = camps.reduce((s, c) => s + (c.leads || 0), 0)
-
-  const w = doc.internal.pageSize.getWidth()
-  const cw = (w - 70) / 5
-  const cards = [
-    { l: 'Gasto Ads', v: `$${spend.toLocaleString('en-US', { maximumFractionDigits: 0 })}`, c: C.amber },
-    { l: 'Conversaciones', v: conv.toLocaleString(), c: C.cyan },
-    { l: 'Leads CRM', v: (gt.total || 0).toLocaleString() },
-    { l: 'Calificados', v: (gt.calificados || 0).toLocaleString(), c: C.purple },
-    { l: 'Cierres', v: (gt.cierres || 0).toLocaleString(), c: C.green }
-  ]
-
-  y = ensureSpace(doc, y, 44)
-  cards.forEach((item, i) => metricCard(doc, 20 + i * (cw + 5), y, cw, 30, item.l, item.v, item.c))
-  y += 38
-
-  autoTable(doc, {
-    startY: y, margin: { left: 20, right: 20 },
-    head: [['Campana', 'Gasto', 'Conv.', 'Leads CRM', 'Calif.', 'Cierres', 'Valor']],
-    body: camps.map(c => [
-      c.campaignName || c.campaign || '',
-      `$${(c.spend || 0).toLocaleString('en-US', { maximumFractionDigits: 0 })}`,
-      c.leads || 0, c.ghlLeads || 0, c.ghlCalificados || 0,
-      c.ghlCierres || 0, `$${(c.ghlValor || 0).toLocaleString()}`
-    ]),
-    ...tableStyles(),
-    styles: { ...tableStyles().styles, fontSize: 7.5, cellPadding: 3.5 },
-    columnStyles: {
-      0: { textColor: C.text, cellWidth: 55 },
-      1: { halign: 'right', textColor: C.amber, fontStyle: 'bold' },
-      2: { halign: 'center', textColor: C.cyan, fontStyle: 'bold' },
-      3: { halign: 'center', textColor: C.text, fontStyle: 'bold' },
-      4: { halign: 'center', textColor: C.purple },
-      5: { halign: 'center', textColor: C.green, fontStyle: 'bold' },
-      6: { halign: 'right', textColor: C.text }
-    }
-  })
-
-  return (doc.lastAutoTable?.finalY || y + 50) + SPACING
-}
-
 // --- Distribucion por Etapas ---
 function renderStages(doc, data, startY) {
   let y = ensureSpace(doc, startY, 80)
@@ -370,7 +280,7 @@ function renderTimes(doc, data, startY) {
 }
 
 // --- FUNCION PRINCIPAL ---
-export async function generateReport({ selectedSections, data, metaCampaigns, dateRange, dateLabel }) {
+export async function generateReport({ selectedSections, data, dateRange, dateLabel }) {
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' })
 
   // Logo con dimensiones reales
@@ -378,14 +288,12 @@ export async function generateReport({ selectedSections, data, metaCampaigns, da
 
   let currentY = drawHeader(doc, logoInfo, dateLabel, dateRange)
 
-  const order = ['funnel', 'sources', 'metaCampaigns', 'stages', 'trend', 'times']
+  const order = ['funnel', 'stages', 'trend', 'times']
   const toRender = order.filter(id => selectedSections.has(id))
 
   for (const id of toRender) {
     switch (id) {
       case 'funnel': currentY = renderFunnel(doc, data, currentY); break
-      case 'sources': currentY = renderSources(doc, data, currentY); break
-      case 'metaCampaigns': currentY = renderMeta(doc, metaCampaigns, currentY); break
       case 'stages': currentY = renderStages(doc, data, currentY); break
       case 'trend': currentY = renderTrend(doc, data, currentY); break
       case 'times': currentY = renderTimes(doc, data, currentY); break
