@@ -7,6 +7,7 @@ import FunnelChart from './components/FunnelChart'
 import StageDistribution from './components/StageDistribution'
 import TrendChart from './components/TrendChart'
 import TimeMetrics from './components/TimeMetrics'
+import OwnerStats from './components/OwnerStats'
 import LoadingSpinner from './components/LoadingSpinner'
 import ErrorAlert from './components/ErrorAlert'
 import ReportBuilder from './components/ReportBuilder'
@@ -340,6 +341,25 @@ function App() {
                 <TimeMetrics times={data.times} />
               </motion.section>
             </div>
+
+            {/* Leads por Owner */}
+            <motion.section
+              initial={{ opacity: 0, y: 60, scale: 0.95 }}
+              whileInView={{ opacity: 1, y: 0, scale: 1 }}
+              viewport={{ once: true, margin: "-50px" }}
+              transition={{ duration: 0.9, ease: [0.22, 1, 0.36, 1] }}
+              className="chart-card"
+            >
+              <div className="flex items-center justify-between mb-8">
+                <div>
+                  <h3 className="text-2xl font-bold text-white tracking-tight font-display">
+                    Leads por Owner
+                  </h3>
+                  <p className="text-base text-white/40 mt-2">Desempeño individual del equipo de ventas</p>
+                </div>
+              </div>
+              <OwnerStats owners={data.owners} />
+            </motion.section>
 
           </div>
         )}

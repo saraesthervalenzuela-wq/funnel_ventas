@@ -49,6 +49,13 @@ class MetricsService {
       '3a5c8cb1-b051-45c2-8469-260ff9e82703',
       'ee8a731e-0713-4cd6-996d-431561b26a6c'
     ];
+
+    // Owners del pipeline (GHL userId → nombre)
+    this.owners = {
+      'ZH9MaRd70PwR0GTqqzv5': 'Alexa',
+      'WdQHELdmGmPHHXwt0R6n': 'Misael',
+      'dYAkyWiYhE8ITKWN4VBF': 'Pedro'
+    };
   }
 
   // Filtrar oportunidades por rango de fechas (basado en fecha de cambio de etapa)
@@ -131,8 +138,32 @@ class MetricsService {
       stages: this._buildStageDistribution(opportunities),
       times: this._buildAverageTimes(opportunities),
       sources: this._buildSourceMetrics(opportunities),
-      trend: this._buildDailyTrend(opportunities)
+      trend: this._buildDailyTrend(opportunities),
+      owners: this._buildOwnerMetrics(opportunities)
     };
+  }
+
+  _buildOwnerMetrics(opportunities) {
+    const stagesDeposito = [
+      this.stageIds.depositoRealizado,
+      this.stageIds.fechaCirugia
+    ];
+
+    return Object.entries(this.owners).map(([ownerId, name]) => {
+      const ownerOpps = opportunities.filter(opp => opp.assignedTo === ownerId);
+      const totalLeads = ownerOpps.length;
+      const calificados = ownerOpps.filter(opp =>
+        opp.pipelineStageId !== this.stageIds.nuevoLead
+      ).length;
+      const cierres = ownerOpps.filter(opp =>
+        stagesDeposito.includes(opp.pipelineStageId)
+      ).length;
+      const tasaConversion = totalLeads > 0
+        ? ((cierres / totalLeads) * 100).toFixed(2)
+        : 0;
+
+      return { ownerId, name, totalLeads, calificados, cierres, tasaConversion };
+    });
   }
 
   // Calcular métricas principales del funnel

@@ -115,6 +115,11 @@ export const mockData = {
       valorTotal: 14000,
       tasaConversion: 4.0
     }
+  ],
+  owners: [
+    { ownerId: 'ZH9MaRd70PwR0GTqqzv5', name: 'Alexa',  totalLeads: 312, calificados: 234, cierres: 38, tasaConversion: '12.18' },
+    { ownerId: 'WdQHELdmGmPHHXwt0R6n', name: 'Misael', totalLeads: 287, calificados: 198, cierres: 31, tasaConversion: '10.80' },
+    { ownerId: 'dYAkyWiYhE8ITKWN4VBF', name: 'Pedro',  totalLeads: 248, calificados: 191, cierres: 25, tasaConversion: '10.08' }
   ]
 }
 

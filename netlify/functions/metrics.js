@@ -191,7 +191,7 @@ async function getLatestSnapshot(startDate, endDate) {
     .single();
 
   if (error || !data) return null;
-  return { funnel: data.funnel, stages: data.stages, times: data.times, sources: data.sources, trend: data.trend };
+  return { funnel: data.funnel, stages: data.stages, times: data.times, sources: data.sources, trend: data.trend, owners: data.owners || [] };
 }
 
 async function insertSnapshot(startDate, endDate, syncType, metricsData, oppCount) {
@@ -199,7 +199,8 @@ async function insertSnapshot(startDate, endDate, syncType, metricsData, oppCoun
     start_date: startDate, end_date: endDate, sync_type: syncType,
     funnel: metricsData.funnel, stages: metricsData.stages,
     times: metricsData.times, sources: metricsData.sources,
-    trend: metricsData.trend, opportunity_count: oppCount
+    trend: metricsData.trend, owners: metricsData.owners,
+    opportunity_count: oppCount
   }).catch(() => {});
 }
 
@@ -250,6 +251,12 @@ const stageOrder = [
   '3a5c8cb1-b051-45c2-8469-260ff9e82703',
   'ee8a731e-0713-4cd6-996d-431561b26a6c'
 ];
+
+const OWNERS = {
+  'ZH9MaRd70PwR0GTqqzv5': 'Alexa',
+  'WdQHELdmGmPHHXwt0R6n': 'Misael',
+  'dYAkyWiYhE8ITKWN4VBF': 'Pedro'
+};
 
 function filterByDateRange(opportunities, startDate, endDate) {
   const [sY, sM, sD] = startDate.split('-').map(Number);
@@ -410,13 +417,28 @@ function buildDailyTrend(opportunities) {
   return Object.entries(dailyData).map(([date, data]) => ({ date, ...data })).sort((a, b) => new Date(a.date) - new Date(b.date));
 }
 
+function buildOwnerMetrics(opportunities) {
+  const stagesDeposito = [stageIds.depositoRealizado, stageIds.fechaCirugia];
+  return Object.entries(OWNERS).map(([ownerId, name]) => {
+    const ownerOpps = opportunities.filter(o => o.assignedTo === ownerId);
+    const totalLeads = ownerOpps.length;
+    const calificados = ownerOpps.filter(o =>
+      o.pipelineStageId !== stageIds.nuevoLead && o.pipelineStageId !== stageIds.noInteresado
+    ).length;
+    const cierres = ownerOpps.filter(o => stagesDeposito.includes(o.pipelineStageId)).length;
+    const tasaConversion = totalLeads > 0 ? ((cierres / totalLeads) * 100).toFixed(2) : 0;
+    return { ownerId, name, totalLeads, calificados, cierres, tasaConversion };
+  });
+}
+
 function calculateAllMetrics(opportunities) {
   return {
     funnel: buildFunnelMetrics(opportunities),
     stages: buildStageDistribution(opportunities),
     times: buildAverageTimes(opportunities),
     sources: buildSourceMetrics(opportunities),
-    trend: buildDailyTrend(opportunities)
+    trend: buildDailyTrend(opportunities),
+    owners: buildOwnerMetrics(opportunities)
   };
 }
 
@@ -561,6 +583,7 @@ exports.handler = async (event) => {
           createdAt: row.created_at, dateAdded: row.created_at,
           updatedAt: row.updated_at, monetaryValue: row.monetary_value,
           source: row.source, status: row.status,
+          assignedTo: raw.assignedTo || null,
           lastStageChangeAt: raw.lastStageChangeAt || raw.lastStatusChangeAt || row.updated_at,
           lastStatusChangeAt: raw.lastStatusChangeAt || row.updated_at,
           contact: { id: row.contact_id, name: row.contact_name, email: row.contact_email, phone: row.contact_phone, tags: row.contact_tags || [] }
