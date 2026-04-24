@@ -47,6 +47,7 @@ function mapOppFromDB(row) {
     monetaryValue: row.monetary_value,
     source: row.source,
     status: row.status,
+    assignedTo: rawJson.assignedTo || null,
     contact: {
       id: row.contact_id,
       name: row.contact_name,
@@ -158,7 +159,8 @@ async function getLatestSnapshot(startDate, endDate) {
     stages: data.stages,
     times: data.times,
     sources: data.sources,
-    trend: data.trend
+    trend: data.trend,
+    owners: data.owners || []
   };
 }
 
@@ -175,6 +177,7 @@ async function insertSnapshot(startDate, endDate, syncType, metricsData, oppCoun
       times: metricsData.times,
       sources: metricsData.sources,
       trend: metricsData.trend,
+      owners: metricsData.owners,
       opportunity_count: oppCount
     });
 
