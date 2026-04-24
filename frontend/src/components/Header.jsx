@@ -35,6 +35,10 @@ function Header({ dateRange, onDateChange, onRefresh, loading, activeView, onVie
     let startDate, endDate
 
     switch (preset) {
+      case 'today':
+        startDate = formatDate(now)
+        endDate = formatDate(now)
+        break
       case 'yesterday':
         const yesterday = new Date(now)
         yesterday.setDate(now.getDate() - 1)
@@ -124,6 +128,7 @@ function Header({ dateRange, onDateChange, onRefresh, loading, activeView, onVie
                    border: '1px solid rgba(255, 255, 255, 0.06)'
                  }}>
               {[
+                { key: 'today', label: 'Hoy' },
                 { key: 'yesterday', label: 'Ayer' },
                 { key: 'week', label: 'Semana' },
                 { key: 'month', label: 'Mes' },
