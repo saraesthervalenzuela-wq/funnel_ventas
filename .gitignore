@@ -29,3 +29,7 @@ Thumbs.db
 
 # Local Netlify folder
 .netlify
+
+# Supabase CLI temp (no aplica tras migración a Neon)
+supabase/.temp/
+.vercel
