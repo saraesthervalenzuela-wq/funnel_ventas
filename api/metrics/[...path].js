@@ -625,8 +625,32 @@ module.exports = async function handler(req, res) {
     // En Vercel el catch-all [...path] llega como req.query.path (array).
     // Mantenemos compat con el rewrite /api/metrics/:path* -> path puede venir vacío.
     const rawPath = req.query.path;
-    const path = Array.isArray(rawPath) ? rawPath.join("/") : rawPath || "";
+    let path = Array.isArray(rawPath) ? rawPath.join("/") : rawPath || "";
+    // Fallback robusto: derivar el endpoint de la URL (el catch-all a veces no
+    // puebla req.query.path en este setup). Ej: /api/metrics/current-stages
+    if (!path && req.url) {
+      path = req.url
+        .split("?")[0]
+        .replace(/^\/+api\/+metrics\/?/, "")
+        .replace(/\/+$/, "");
+    }
     const params = req.query || {};
+
+    // Validar formato YYYY-MM-DD de los params de fecha (evita 500 por cast a date inválido).
+    const isValidDate = (d) => {
+      if (typeof d !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(d)) return false;
+      const dt = new Date(`${d}T00:00:00`);
+      return !Number.isNaN(dt.getTime());
+    };
+    if (params.startDate || params.endDate) {
+      if (!isValidDate(params.startDate) || !isValidDate(params.endDate)) {
+        return res.status(400).json({
+          success: false,
+          error:
+            "startDate y endDate deben tener formato YYYY-MM-DD válido (ej. 2026-06-01)",
+        });
+      }
+    }
 
     const dateRange =
       params.startDate && params.endDate
@@ -663,28 +687,24 @@ module.exports = async function handler(req, res) {
         dateRange.endDate,
       );
       if (snapshot) {
-        return res
-          .status(200)
-          .json({
-            success: true,
-            dateRange,
-            source: "snapshot",
-            data: snapshot,
-          });
+        return res.status(200).json({
+          success: true,
+          dateRange,
+          source: "snapshot",
+          data: snapshot,
+        });
       }
 
       // 2. Sin snapshot: leer oportunidades de la DB (ya mapeadas)
       const opportunities = await db.getOpportunitiesFromDB();
 
       if (opportunities.length === 0) {
-        return res
-          .status(200)
-          .json({
-            success: true,
-            dateRange,
-            source: "empty",
-            data: calculateAllMetrics([]),
-          });
+        return res.status(200).json({
+          success: true,
+          dateRange,
+          source: "empty",
+          data: calculateAllMetrics([]),
+        });
       }
 
       const filtered = filterByDateRange(
@@ -714,36 +734,46 @@ module.exports = async function handler(req, res) {
       return res.status(200).json({ success: true, data });
     }
 
-    // Endpoints individuales (pegan directo a GHL)
-    const allOpportunities = await fetchAllOpportunities();
+    // Endpoints individuales (pegan directo a GHL).
+    // Primero validamos que el path sea conocido: un path desconocido NO debe
+    // disparar una llamada a GHL — responde 404 directo.
+    const ghlBuilders = {
+      funnel: buildFunnelMetrics,
+      stages: buildStageDistribution,
+      times: buildAverageTimes,
+      sources: buildSourceMetrics,
+      trend: buildDailyTrend,
+    };
+    const builder = ghlBuilders[path];
+    if (!builder) {
+      return res.status(404).json({ error: "Endpoint no encontrado" });
+    }
+
+    // El fetch a GHL puede fallar (401 sin API key v2, 5xx, timeout). En ese caso
+    // degradamos con gracia: 200 con data vacía (el builder con [] genera la
+    // estructura correcta) y source "ghl_unavailable", en lugar de tirar un 500.
+    let allOpportunities;
+    try {
+      allOpportunities = await fetchAllOpportunities();
+    } catch (ghlError) {
+      console.error(`⚠️ GHL no disponible para /${path}: ${ghlError.message}`);
+      return res.status(200).json({
+        success: true,
+        dateRange,
+        source: "ghl_unavailable",
+        data: builder([]),
+      });
+    }
+
     const opportunities = filterByDateRange(
       allOpportunities,
       dateRange.startDate,
       dateRange.endDate,
     );
 
-    let data;
-    switch (path) {
-      case "funnel":
-        data = buildFunnelMetrics(opportunities);
-        break;
-      case "stages":
-        data = buildStageDistribution(opportunities);
-        break;
-      case "times":
-        data = buildAverageTimes(opportunities);
-        break;
-      case "sources":
-        data = buildSourceMetrics(opportunities);
-        break;
-      case "trend":
-        data = buildDailyTrend(opportunities);
-        break;
-      default:
-        return res.status(404).json({ error: "Endpoint no encontrado" });
-    }
-
-    return res.status(200).json({ success: true, dateRange, data });
+    return res
+      .status(200)
+      .json({ success: true, dateRange, data: builder(opportunities) });
   } catch (error) {
     return res.status(500).json({ success: false, error: error.message });
   }

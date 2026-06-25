@@ -3,8 +3,8 @@
   "buildCommand": "cd frontend && npm install && npm run build",
   "outputDirectory": "frontend/dist",
   "framework": null,
+  "functions": { "api/**": { "maxDuration": 60 } },
   "rewrites": [
-    { "source": "/api/metrics/:path*", "destination": "/api/metrics/:path*" },
     { "source": "/api/ai/analyze", "destination": "/api/ai" },
     { "source": "/((?!api/).*)", "destination": "/index.html" }
   ],
