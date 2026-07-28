@@ -101,7 +101,8 @@ function Header({ dateRange, onDateChange, onRefresh, loading, activeView, onVie
             {[
               { key: 'dashboard', label: 'Dashboard' },
               { key: 'reportes', label: 'Reportes' },
-              { key: 'analisis', label: 'Análisis' },
+              // Análisis (IA) oculto 28-jul-2026 — tokens Anthropic los paga CaliDevs, no Sara
+              // { key: 'analisis', label: 'Análisis' },
             ].map(tab => (
               <button
                 key={tab.key}
