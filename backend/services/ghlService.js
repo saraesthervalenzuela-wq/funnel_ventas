@@ -99,8 +99,11 @@ class GHLService {
     try {
       let allOpportunities = [];
       let hasMore = true;
-      let page = 1;
       let pageCount = 0;
+      // GHL rechaza paginación por `page` arriba de 10,000 registros
+      // (SEARCH_USE_START_AFTER_PAGINATION) — se usa cursor startAfter/startAfterId
+      let startAfter = null;
+      let startAfterId = null;
 
       console.log("🔽 Descargando oportunidades de GHL (API v2)...");
 
@@ -109,8 +112,11 @@ class GHLService {
           location_id: this.locationId,
           pipeline_id: this.pipelineId,
           limit: 100,
-          page: page,
         });
+        if (startAfterId) {
+          params.set("startAfter", String(startAfter));
+          params.set("startAfterId", startAfterId);
+        }
 
         const response = await this.makeRequest(
           "get",
@@ -128,10 +134,12 @@ class GHLService {
         const meta = response.data.meta;
         if (
           meta &&
+          meta.startAfterId &&
           meta.total > allOpportunities.length &&
           opportunities.length === 100
         ) {
-          page++;
+          startAfter = meta.startAfter;
+          startAfterId = meta.startAfterId;
         } else {
           hasMore = false;
         }
