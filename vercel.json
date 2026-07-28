@@ -8,5 +8,5 @@
     { "source": "/api/ai/analyze", "destination": "/api/ai" },
     { "source": "/((?!api/).*)", "destination": "/index.html" }
   ],
-  "crons": [{ "path": "/api/cron/sync", "schedule": "*/30 * * * *" }]
+  "crons": [{ "path": "/api/cron/sync", "schedule": "0 */4 * * *" }]
 }
